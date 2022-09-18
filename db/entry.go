@@ -28,8 +28,8 @@ func (e *Entry) Serialize() []byte {
 
 func Deserialize(b []byte) *Entry {
 	e := &Entry{}
-	e.Timestamp = binary.LittleEndian.Uint32(b[4:8])
-	e.KeySize = b[8]
-	e.ValueSize = binary.LittleEndian.Uint16(b[9:11])
+	e.Timestamp = binary.LittleEndian.Uint32(b[0:4])
+	e.KeySize = b[4]
+	e.ValueSize = binary.LittleEndian.Uint16(b[5:7])
 	return e
 }
