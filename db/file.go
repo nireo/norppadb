@@ -28,3 +28,33 @@ func NewFile(path string, id int64) (*File, error) {
 	}
 	return &File{file, stat.Size(), id}, nil
 }
+
+// returns the value and possible errors
+func (f *File) Read(offset int64) ([]byte, error) {
+	// read header fast
+	buf := make([]byte, HeaderSize)
+
+	if _, err := f.fp.ReadAt(buf, offset); err != nil {
+		return nil, err
+	}
+
+	// deserialize header information
+	hdr := Deserialize(buf)
+	offset += HeaderSize + int64(hdr.KeySize)
+
+	val := make([]byte, hdr.ValueSize)
+	if _, err := f.fp.ReadAt(val, offset); err != nil {
+		return nil, err
+	}
+
+	return val, nil
+}
+
+func (f *File) Write(e *Entry) error {
+	b := e.Serialize()
+	if _, err := f.fp.WriteAt(b, f.offset); err != nil {
+		return err
+	}
+	f.offset += e.Size()
+	return nil
+}

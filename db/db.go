@@ -1,6 +1,8 @@
 package db
 
 import (
+	"fmt"
+	"io/ioutil"
 	"os"
 	"sync"
 	"time"
@@ -39,6 +41,26 @@ func Open(dataDir string) (*DB, error) {
 	}
 
 	return db, nil
+}
+
+func (db *DB) parsedir() error {
+	datafiles, err := ioutil.ReadDir(db.dir)
+	if err != nil {
+		return err
+	}
+
+	var wg sync.WaitGroup
+
+	for _, f := range datafiles {
+		var id int64
+		fmt.Sscanf(f.Name(), "%d.dt", &id)
+
+		go func(fname string, idd int64) {
+		}(f.Name(), id)
+	}
+
+	wg.Wait()
+	return nil
 }
 
 func (db *DB) Close() {

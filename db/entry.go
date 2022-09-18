@@ -15,6 +15,10 @@ type Entry struct {
 	Timestamp uint32
 }
 
+func (e *Entry) Size() int64 {
+	return int64(e.KeySize) + int64(e.ValueSize) + HeaderSize
+}
+
 func (e *Entry) Serialize() []byte {
 	kuint16 := uint16(e.KeySize)
 	buf := make([]byte, HeaderSize+kuint16+e.ValueSize)
@@ -23,6 +27,7 @@ func (e *Entry) Serialize() []byte {
 	binary.LittleEndian.PutUint16(buf[5:7], e.ValueSize)
 	copy(buf[HeaderSize:HeaderSize+kuint16], e.Key)
 	copy(buf[HeaderSize+kuint16:], e.Value)
+
 	return buf
 }
 
