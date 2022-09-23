@@ -57,9 +57,9 @@ func (db *DB) parsedir() error {
 	for _, f := range datafiles {
 		var id int64
 		fmt.Sscanf(f.Name(), "%d.dt", &id)
+		wg.Add(1)
 
 		go func(fname string, idd int64) {
-			wg.Add(1)
 			defer wg.Done()
 		}(f.Name(), id)
 	}
@@ -112,9 +112,10 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// TODO: read from datafiles.
-	return db.active.Read(info.offset)
+	if info.fileid == db.active.id {
+		return db.active.Read(info.offset)
+	}
+	return db.dfiles[info.fileid].Read(info.offset)
 }
 
 func (db *DB) Close() {
@@ -133,8 +134,8 @@ func (db *DB) Sync() error {
 	var wg sync.WaitGroup
 	errChan := make(chan error)
 	for _, f := range db.dfiles {
+		wg.Add(1)
 		go func(df *File) {
-			wg.Add(1)
 			defer wg.Done()
 
 			if err := df.fp.Sync(); err != nil {
