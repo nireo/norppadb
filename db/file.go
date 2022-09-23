@@ -17,11 +17,13 @@ func (f *File) Close() error {
 }
 
 func NewFile(path string, id int64) (*File, error) {
-	fname := filepath.Join(path, fmt.Sprintf("%d", id), ".data")
+	// format the given timestamp id and create the file.
+	fname := filepath.Join(path, fmt.Sprintf("%d.data", id))
 	file, err := os.OpenFile(fname, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return nil, err
 	}
+	// read state to get file size
 	stat, err := os.Stat(fname)
 	if err != nil {
 		return nil, err
