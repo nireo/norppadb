@@ -118,12 +118,13 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 	return db.dfiles[info.fileid].Read(info.offset)
 }
 
-func (db *DB) Close() {
+func (db *DB) Close() error {
 	db.active.Close()
 
 	for _, f := range db.dfiles {
 		f.Close()
 	}
+	return nil
 }
 
 func (db *DB) Sync() error {
