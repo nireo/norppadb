@@ -1,0 +1,15 @@
+syntax = "proto3";
+package store;
+option go_package = "github.com/nireo/norppadb/store";
+
+message Action {
+  optional bytes key = 1;
+  optional bytes value = 2;
+
+  enum ACTION_TYPE {
+    GET = 0;
+    NEW = 1;
+    DELETE = 2;
+  }
+  ACTION_TYPE type = 3;
+}

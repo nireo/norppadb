@@ -11,7 +11,7 @@ import (
 
 const MaxKeySize int = 128             // 128 bytes
 const MaxValueSize int = (1 << 16) - 1 // 65kb
-const MaxFileSize int = 1 << 22        // 4mb
+const MaxFileSize int64 = 1 << 21      // 2mb
 
 // DB contains the logic for handling the database
 type DB struct {
@@ -76,9 +76,21 @@ func (db *DB) parsedir() error {
 func (db *DB) Put(key, value []byte) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
-
 	// TODO: check size that we can change the active datafile
 	offset := db.active.offset
+	if offset > MaxFileSize {
+		// we can use the same pointer so that we don't need to open
+		// a new file pointer for no reason
+		db.dfiles[db.active.id] = db.active
+
+		var err error
+		db.active, err = NewFile(db.dir, time.Now().Unix())
+		if err != nil {
+			return err
+		}
+		// continue normal operations
+	}
+
 	if err := db.active.Write(&Entry{
 		Key:       key,
 		Value:     value,
@@ -89,7 +101,6 @@ func (db *DB) Put(key, value []byte) error {
 		return err
 	}
 	db.idx.Set(key, db.active.id, offset)
-
 	return nil
 }
 
