@@ -1,8 +1,12 @@
 package db_test
 
 import (
+	"bytes"
+	"errors"
 	"io/ioutil"
+	"math/rand"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/nireo/norppadb/db"
@@ -25,6 +29,27 @@ func createTestDB(t *testing.T) (*db.DB, string) {
 	})
 
 	return db, file
+}
+
+type testpair struct {
+	key   []byte
+	value []byte
+}
+
+func genRandomPairs(amount, stringSize int) []testpair {
+	alphabet := []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	alen := len(alphabet)
+	pairs := make([]testpair, amount)
+	for i := 0; i < amount; i++ {
+		b := make([]byte, stringSize)
+		for j := 0; j < stringSize; j++ {
+			b[j] = alphabet[rand.Intn(alen)]
+		}
+
+		pairs[i].key = b
+		pairs[i].value = b
+	}
+	return pairs
 }
 
 func Test_entrySerialization(t *testing.T) {
@@ -65,5 +90,61 @@ func Test_dbStartup(t *testing.T) {
 
 	if len(files) != 1 {
 		t.Fatalf("only 1 file should exist in the data directory, but got: %d\n", len(files))
+	}
+}
+
+func Test_dbOperations(t *testing.T) {
+	db, _ := createTestDB(t)
+
+	key := []byte("hello")
+	value := []byte("world")
+
+	if err := db.Put(key, value); err != nil {
+		t.Fatalf("error writing key-value pair to database: %s\n", err)
+	}
+
+	val, err := db.Get(key)
+	if err != nil {
+		t.Fatalf("error getting key from database: %s\n", err)
+	}
+
+	if !bytes.Equal(val, value) {
+		t.Fatalf("values don't match.\n\tgot: %s\n\twant: %s\n", string(val), string(value))
+	}
+}
+
+func Test_manyDbOperations(t *testing.T) {
+	db, _ := createTestDB(t)
+
+	pairs := genRandomPairs(50, 32)
+	var wg sync.WaitGroup
+	errChan := make(chan error)
+
+	for _, pr := range pairs {
+		go func(p testpair) {
+			wg.Add(1)
+			defer wg.Done()
+			if err := db.Put(p.key, p.value); err != nil {
+				errChan <- err
+				return
+			}
+
+			val, err := db.Get(p.key)
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			if !bytes.Equal(val, p.value) {
+				errChan <- errors.New("values don't match")
+				return
+			}
+		}(pr)
+	}
+
+	wg.Wait()
+	close(errChan)
+	if len(errChan) != 0 {
+		t.Fatalf("errors exist")
 	}
 }
