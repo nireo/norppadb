@@ -1,11 +1,13 @@
 package http
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"strings"
 
 	"github.com/nireo/norppadb/db"
 	"github.com/nireo/norppadb/store"
@@ -105,14 +107,108 @@ func (s *Server) put(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet &&
-		r.Method != http.MethodDelete &&
-		r.Method != http.MethodPut {
+func (s *Server) join(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
+	b, err := io.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	m := make(map[string]interface{})
+	if err := json.Unmarshal(b, &m); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	id, ok := m["id"]
+	if !ok {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	addr, ok := m["addr"]
+	if !ok {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if err := s.store.Join(id.(string), addr.(string)); err != nil {
+		if err == store.ErrNotLeader {
+			leaderAddr := s.store.LeaderAddr()
+			if leaderAddr == "" {
+				http.Error(w, "leader not found", http.StatusInternalServerError)
+				return
+			}
+
+			http.Redirect(w, r,
+				fmt.Sprintf("%s%s", leaderAddr, r.URL.Path), http.StatusMovedPermanently)
+			return
+		}
+
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
+func (s *Server) leave(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	b, err := io.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	m := make(map[string]interface{})
+	if err := json.Unmarshal(b, &m); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	id, ok := m["id"]
+	if !ok {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if err := s.store.Leave(id.(string)); err != nil {
+		if err == store.ErrNotLeader {
+			leaderAddr := s.store.LeaderAddr()
+			if leaderAddr == "" {
+				http.Error(w, "leader not found", http.StatusInternalServerError)
+				return
+			}
+
+			http.Redirect(w, r,
+				fmt.Sprintf("%s%s", leaderAddr, r.URL.Path), http.StatusMovedPermanently)
+			return
+		}
+
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/join") {
+		s.join(w, r)
+		return
+	}
+
+	if strings.HasPrefix(r.URL.Path, "/leave") {
+		s.leave(w, r)
+		return
+	}
+
+	// handle general cases
 	switch r.Method {
 	case http.MethodGet:
 		s.get(w, r)
@@ -124,5 +220,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// delete key
 		w.WriteHeader(http.StatusNoContent)
 		return
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
