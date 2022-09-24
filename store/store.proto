@@ -13,3 +13,9 @@ message Action {
   }
   ACTION_TYPE type = 3;
 }
+
+message Server {
+  string id = 1;
+  string rpc_addr = 2;
+  bool is_leader = 3;
+}

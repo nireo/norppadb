@@ -27,6 +27,7 @@ const (
 var (
 	ErrTimeoutExpired = errors.New("timeout expired")
 	ErrNotLeader      = errors.New("not leader")
+	ErrJoinSelf       = errors.New("trying to join self")
 )
 
 type Config struct {
@@ -41,6 +42,9 @@ type RaftStore interface {
 	Get(key []byte) (val []byte, err error)
 	Put(key []byte, val []byte) error
 	Delete(key []byte) error
+	Leave(id string) error
+	Join(id, addr string) error
+	GetServers() ([]*Server, error)
 }
 
 type Store struct {
@@ -77,7 +81,6 @@ func (s *Store) setupdb(dir string) error {
 		return err
 	}
 	s.datadir = dbPath
-
 	var err error
 	s.db, err = db.Open(dbPath)
 	return err
@@ -218,4 +221,55 @@ func (s *Store) Leave(id string) error {
 		}
 	}
 	return nil
+}
+
+func (s *Store) Join(id, addr string) error {
+	if !s.IsLeader() {
+		return ErrNotLeader
+	}
+	serverID := raft.ServerID(id)
+	serverAddr := raft.ServerAddress(addr)
+	if serverID == s.conf.Raft.LocalID {
+		return ErrJoinSelf
+	}
+	f := s.raft.GetConfiguration()
+	if err := f.Error(); err != nil {
+		return err
+	}
+	for _, srv := range f.Configuration().Servers {
+		if srv.ID == serverID || srv.Address == serverAddr {
+			if srv.ID == serverID && srv.Address == serverAddr {
+				return nil
+			}
+			removeFuture := s.raft.RemoveServer(serverID, 0, 0)
+			if err := removeFuture.Error(); err != nil {
+				return err
+			}
+		}
+	}
+	addf := s.raft.AddVoter(serverID, serverAddr, 0, 0)
+	if err := addf.Error(); err != nil {
+		if err == raft.ErrNotLeader {
+			return ErrNotLeader
+		}
+
+		return err
+	}
+	return nil
+}
+
+func (s *Store) GetServers() ([]*Server, error) {
+	future := s.raft.GetConfiguration()
+	if err := future.Error(); err != nil {
+		return nil, err
+	}
+	var servers []*Server
+	for _, server := range future.Configuration().Servers {
+		servers = append(servers, &Server{
+			Id:       string(server.ID),
+			RpcAddr:  string(server.Address),
+			IsLeader: s.raft.Leader() == server.Address,
+		})
+	}
+	return servers, nil
 }
