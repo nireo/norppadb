@@ -48,6 +48,7 @@ type RaftStore interface {
 	Leave(id string) error
 	Join(id, addr string) error
 	GetServers() ([]*Server, error)
+	LeaderAddr() string
 }
 
 type Store struct {
@@ -343,13 +344,6 @@ func (s *Store) Get(key []byte) ([]byte, error) {
 		return r.res, r.err
 	}
 	return s.db.Get(key)
-}
-
-func (s *Store) Set(key, val []byte) error {
-	if !s.IsLeader() {
-		return ErrNotLeader
-	}
-	return nil
 }
 
 func (s *Store) GetServers() ([]*Server, error) {
