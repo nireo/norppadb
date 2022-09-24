@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb"
 	"github.com/nireo/norppadb/db"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -28,6 +29,7 @@ var (
 	ErrTimeoutExpired = errors.New("timeout expired")
 	ErrNotLeader      = errors.New("not leader")
 	ErrJoinSelf       = errors.New("trying to join self")
+	ErrValuesAreNil   = errors.New("values are nil")
 )
 
 type Config struct {
@@ -35,6 +37,7 @@ type Config struct {
 		raft.Config
 		Bootstrap         bool
 		SnapshotThreshold uint64
+		StrongConsistency bool
 	}
 }
 
@@ -59,6 +62,11 @@ type Store struct {
 
 type snapshot struct {
 	db *db.DB
+}
+
+type applyRes struct {
+	err error
+	res []byte
 }
 
 // dir is the datadir which contains raft data and database data
@@ -155,8 +163,42 @@ func (s *Store) setupraft(dir string) error {
 	return err
 }
 
-func (f *Store) Apply(l *raft.Log) interface{} {
+func (s *Store) Apply(l *raft.Log) interface{} {
+	var ac Action
+
+	if err := proto.Unmarshal(l.Data, &ac); err != nil {
+		return err
+	}
+
+	switch ac.Type {
+	case Action_GET:
+		if ac.Key == nil {
+			return ErrValuesAreNil
+		}
+		res, err := s.db.Get(ac.Key)
+		return &applyRes{res: res, err: err}
+	case Action_NEW:
+		if ac.Key == nil || ac.Value == nil {
+			return ErrValuesAreNil
+		}
+		return &applyRes{res: nil, err: s.db.Put(ac.Key, ac.Value)}
+	}
+
 	return nil
+}
+
+func (s *Store) Put(key, value []byte) error {
+	if !s.IsLeader() {
+		return ErrNotLeader
+	}
+
+	res, err := s.apply(Action_NEW, key, value)
+	if err != nil {
+		return err
+	}
+
+	r := res.(*applyRes)
+	return r.err
 }
 
 func (f *Store) Snapshot() (raft.FSMSnapshot, error) {
@@ -223,6 +265,33 @@ func (s *Store) Leave(id string) error {
 	return nil
 }
 
+func (s *Store) apply(ty Action_ACTION_TYPE, key, value []byte) (any, error) {
+	action := &Action{
+		Type:  ty,
+		Key:   key,
+		Value: value,
+	}
+
+	b, err := proto.Marshal(action)
+	if err != nil {
+		return nil, err
+	}
+
+	f := s.raft.Apply(b, raftTimeout)
+	if f.Error() != nil {
+		if f.Error() == raft.ErrNotLeader {
+			return nil, ErrNotLeader
+		}
+		return nil, f.Error()
+	}
+
+	r := f.Response()
+	if err, ok := r.(error); ok {
+		return nil, err
+	}
+	return r, nil
+}
+
 func (s *Store) Join(id, addr string) error {
 	if !s.IsLeader() {
 		return ErrNotLeader
@@ -254,6 +323,31 @@ func (s *Store) Join(id, addr string) error {
 		}
 
 		return err
+	}
+	return nil
+}
+
+func (s *Store) Get(key []byte) ([]byte, error) {
+	// query from the leader
+	if s.conf.Raft.StrongConsistency {
+		if !s.IsLeader() {
+			return nil, ErrNotLeader
+		}
+
+		res, err := s.apply(Action_GET, key, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		r := res.(*applyRes)
+		return r.res, r.err
+	}
+	return s.db.Get(key)
+}
+
+func (s *Store) Set(key, val []byte) error {
+	if !s.IsLeader() {
+		return ErrNotLeader
 	}
 	return nil
 }
