@@ -3,7 +3,6 @@ package db
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"sync"
 	"time"
@@ -45,7 +44,7 @@ func Open(dataDir string) (*DB, error) {
 }
 
 func (db *DB) parsedir() error {
-	datafiles, err := ioutil.ReadDir(db.dir)
+	datafiles, err := os.ReadDir(db.dir)
 	if err != nil {
 		return err
 	}

@@ -3,7 +3,6 @@ package db_test
 import (
 	"bytes"
 	"errors"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"sync"
@@ -83,7 +82,7 @@ func Test_entrySerialization(t *testing.T) {
 func Test_dbStartup(t *testing.T) {
 	_, dir := createTestDB(t)
 
-	files, err := ioutil.ReadDir(dir)
+	files, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("failed reading data directory '%s': %s\n", dir, err)
 	}
@@ -121,8 +120,8 @@ func Test_manyDbOperations(t *testing.T) {
 	errChan := make(chan error)
 
 	for _, pr := range pairs {
+		wg.Add(1)
 		go func(p testpair) {
-			wg.Add(1)
 			defer wg.Done()
 			if err := db.Put(p.key, p.value); err != nil {
 				errChan <- err

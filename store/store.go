@@ -7,9 +7,13 @@ package store
 import (
 	"errors"
 	"io"
+	"net"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/hashicorp/raft"
+	raftboltdb "github.com/hashicorp/raft-boltdb"
 	"github.com/nireo/norppadb/db"
 )
 
@@ -17,6 +21,7 @@ const (
 	raftTimeout      = 10 * time.Second
 	leaderWaitDelay  = 100 * time.Millisecond
 	appliedWaitDelay = 100 * time.Millisecond
+	maxPool          = 5
 )
 
 var (
@@ -24,32 +29,138 @@ var (
 	ErrNotLeader      = errors.New("not leader")
 )
 
-type Store struct {
-	raft    *raft.Raft
-	running bool
-	db      *db.DB // the internal database of a node
-	raftdir string
+type Config struct {
+	Raft struct {
+		raft.Config
+		Bootstrap         bool
+		SnapshotThreshold uint64
+	}
 }
 
-type fsm struct {
-	db *db.DB
+type RaftStore interface {
+	Get(key []byte) (val []byte, err error)
+	Put(key []byte, val []byte) error
+	Delete(key []byte) error
+}
+
+type Store struct {
+	conf     *Config
+	raft     *raft.Raft
+	db       *db.DB // the internal database of a node
+	raftdir  string
+	datadir  string
+	bindaddr string
+	nt       *raft.NetworkTransport
 }
 
 type snapshot struct {
 	db *db.DB
 }
 
-var _ raft.FSM = &fsm{}
+// dir is the datadir which contains raft data and database data
+func New(dir, bind string) (*Store, error) {
+	st := &Store{bindaddr: bind}
+	if err := st.setupdb(dir); err != nil {
+		return nil, err
+	}
 
-func (f *fsm) Apply(l *raft.Log) interface{} {
+	if err := st.setupraft(dir); err != nil {
+		return nil, err
+	}
+
+	return st, nil
+}
+
+func (s *Store) setupdb(dir string) error {
+	dbPath := filepath.Join(dir, "db")
+	if err := os.MkdirAll(dbPath, os.ModePerm); err != nil {
+		return err
+	}
+	s.datadir = dbPath
+
+	var err error
+	s.db, err = db.Open(dbPath)
+	return err
+}
+
+func (s *Store) setupraft(dir string) error {
+	raftDir := filepath.Join(dir, "raft")
+	if err := os.MkdirAll(raftDir, os.ModePerm); err != nil {
+		return err
+	}
+	s.raftdir = raftDir
+
+	addr, err := net.ResolveTCPAddr("tcp", s.bindaddr)
+	if err != nil {
+		return err
+	}
+
+	transport, err := raft.NewTCPTransport(s.bindaddr, addr, maxPool, raftTimeout, os.Stderr)
+	if err != nil {
+		return err
+	}
+
+	stableStore, err := raftboltdb.NewBoltStore(filepath.Join(raftDir, "raft.db"))
+	if err != nil {
+		return err
+	}
+
+	snapshotStore, err := raft.NewFileSnapshotStore(raftDir, 1, os.Stderr)
+	if err != nil {
+		return err
+	}
+
+	config := raft.DefaultConfig()
+	config.SnapshotThreshold = s.conf.Raft.SnapshotThreshold
+	config.LocalID = s.conf.Raft.LocalID
+
+	if s.conf.Raft.HeartbeatTimeout != 0 {
+		config.HeartbeatTimeout = s.conf.Raft.HeartbeatTimeout
+	}
+
+	if s.conf.Raft.ElectionTimeout != 0 {
+		config.ElectionTimeout = s.conf.Raft.ElectionTimeout
+	}
+
+	if s.conf.Raft.LeaderLeaseTimeout != 0 {
+		config.LeaderLeaseTimeout = s.conf.Raft.LeaderLeaseTimeout
+	}
+
+	if s.conf.Raft.CommitTimeout != 0 {
+		config.CommitTimeout = s.conf.Raft.CommitTimeout
+	}
+
+	s.raft, err = raft.NewRaft(config, s, stableStore, stableStore, snapshotStore, transport)
+	if err != nil {
+		return err
+	}
+
+	hasState, err := raft.HasExistingState(stableStore, stableStore, snapshotStore)
+	if err != nil {
+		return err
+	}
+
+	if s.conf.Raft.Bootstrap && !hasState {
+		conf := raft.Configuration{
+			Servers: []raft.Server{{
+				ID:      config.LocalID,
+				Address: s.nt.LocalAddr(),
+			}},
+		}
+		err = s.raft.BootstrapCluster(conf).Error()
+	}
+	return err
+}
+
+func (f *Store) Apply(l *raft.Log) interface{} {
 	return nil
 }
 
-func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
+func (f *Store) Snapshot() (raft.FSMSnapshot, error) {
 	return &snapshot{db: f.db}, nil
 }
 
-func (f *fsm) Restore(snapshot io.ReadCloser) error {
+func (f *Store) Restore(snapshot io.ReadCloser) error {
 	return nil
 }
 
