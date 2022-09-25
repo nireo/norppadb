@@ -1,15 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/nireo/norppadb/http"
+	norppahttp "github.com/nireo/norppadb/http"
 	"github.com/nireo/norppadb/store"
 )
 
@@ -30,6 +33,7 @@ func init() {
 }
 
 func main() {
+	flag.Parse()
 	// create store
 	config := &store.Config{}
 	config.Raft.BindAddr = raftbind
@@ -49,12 +53,37 @@ func main() {
 	}
 
 	if join != "" {
+		jsonmap := make(map[string]interface{})
+		jsonmap["id"] = nodeid
+		jsonmap["addr"] = raftbind
+
+		b, err := json.Marshal(jsonmap)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		req, err := http.NewRequest("POST", join + "/join", bytes.NewBuffer(b))
+		if err != nil {
+			log.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			panic(err)
+		}
+		defer resp.Body.Close()
+
+		if req.Response.StatusCode != http.StatusOK {
+			log.Fatalf("failed sending join request, got code: %d", req.Response.StatusCode)
+		}
+
 		// send a HTTP-request to raft leader to join the cluster.
 		return
 	}
 
 	// create http server
-	srv := http.New(serveraddr, st)
+	srv := norppahttp.New(serveraddr, st)
 	if err := srv.Start(); err != nil {
 		log.Fatal("error starting server")
 	}
