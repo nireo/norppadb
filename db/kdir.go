@@ -2,7 +2,6 @@ package db
 
 import (
 	"bytes"
-	"time"
 	"encoding/gob"
 	"errors"
 	"sync"

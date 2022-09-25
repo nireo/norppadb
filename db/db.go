@@ -2,7 +2,6 @@ package db
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"os"
@@ -144,7 +143,7 @@ func (db *DB) Put(key, value []byte) error {
 	}); err != nil {
 		return err
 	}
-	db.idx.Set(key, db.active.id, offset)
+	db.idx.Set(key, db.active.id, offset, time.Now().Unix())
 	return nil
 }
 

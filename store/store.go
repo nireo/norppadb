@@ -45,7 +45,6 @@ type Config struct {
 type RaftStore interface {
 	Get(key []byte) (val []byte, err error)
 	Put(key []byte, val []byte) error
-	Delete(key []byte) error
 	Leave(id string) error
 	Join(id, addr string) error
 	GetServers() ([]*Server, error)
