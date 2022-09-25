@@ -38,7 +38,7 @@ type Config struct {
 		Bootstrap         bool
 		SnapshotThreshold uint64
 		StrongConsistency bool
-		BindAddr string
+		BindAddr          string
 	}
 }
 
@@ -52,12 +52,12 @@ type RaftStore interface {
 }
 
 type Store struct {
-	conf     *Config
-	raft     *raft.Raft
-	db       *db.DB // the internal database of a node
-	raftdir  string
-	datadir  string
-	nt       *raft.NetworkTransport
+	conf    *Config
+	raft    *raft.Raft
+	db      *db.DB // the internal database of a node
+	raftdir string
+	datadir string
+	nt      *raft.NetworkTransport
 }
 
 type snapshot struct {

@@ -23,8 +23,8 @@ func newKdir() *kdir {
 }
 
 type kdirItem struct {
-	fileid int64
-	offset int64
+	fileid    int64
+	offset    int64
 	timestamp int64
 }
 

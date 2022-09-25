@@ -62,7 +62,7 @@ func main() {
 			log.Fatal(err)
 		}
 
-		req, err := http.NewRequest("POST", join + "/join", bytes.NewBuffer(b))
+		req, err := http.NewRequest("POST", join+"/join", bytes.NewBuffer(b))
 		if err != nil {
 			log.Fatal(err)
 		}

@@ -76,7 +76,7 @@ func (f *File) ReadHeader(offset int64) (*Entry, error) {
 
 	e := Deserialize(buf)
 	key := make([]byte, e.KeySize)
-	if _, err := f.fp.ReadAt(buf, offset + int64(e.KeySize)); err != nil {
+	if _, err := f.fp.ReadAt(buf, offset+int64(e.KeySize)); err != nil {
 		return nil, err
 	}
 

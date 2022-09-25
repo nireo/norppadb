@@ -97,7 +97,7 @@ func (db *DB) parsedir() error {
 					// do nothing since the existing entry in the index is newer
 					// than the one of the entry
 				} else {
-					// key doesn't exist; set the key 
+					// key doesn't exist; set the key
 					db.idx.Set(e.Key, id, offset, ts)
 				}
 				offset += e.Size()

@@ -150,7 +150,7 @@ func Test_manyDbOperations(t *testing.T) {
 
 func Test_readid(t *testing.T) {
 	type tc struct {
-		fname string
+		fname    string
 		expected int64
 	}
 
