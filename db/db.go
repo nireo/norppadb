@@ -3,7 +3,10 @@ package db
 import (
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -43,6 +46,7 @@ func Open(dataDir string) (*DB, error) {
 	return db, nil
 }
 
+// parsedir parses all of the datafiles in the directory.
 func (db *DB) parsedir() error {
 	datafiles, err := os.ReadDir(db.dir)
 	if err != nil {
@@ -50,16 +54,57 @@ func (db *DB) parsedir() error {
 	}
 
 	var wg sync.WaitGroup
-
 	errChan := make(chan error)
-
 	for _, f := range datafiles {
 		var id int64
-		fmt.Sscanf(f.Name(), "%d.dt", &id)
 		wg.Add(1)
-
 		go func(fname string, idd int64) {
+			// read a single datafile concurrently to speed up reading all of the files.
 			defer wg.Done()
+
+			id := ReadID(fname)
+			if id == 0 {
+				// failed reading entry.
+				log.Printf("failed reading filename: %s", fname)
+				return
+			}
+
+			var offset int64
+			df, err := NewReadOnly(filepath.Join(db.dir, fname))
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			// read entries.
+			for {
+				e, err := df.ReadHeader(offset)
+				if err != nil {
+					if err == io.EOF {
+						break
+					}
+					errChan <- err
+					return
+				}
+
+				ts := int64(e.Timestamp)
+				if meta, err := db.idx.Get(e.Key); err == nil {
+					if meta.timestamp < ts {
+						// update with the most recent entry. we need to check the
+						// timestamp since parsing is done concurrently, we cannot
+						// otherwise decide on the most recent entry otherwise.
+						db.idx.Set(e.Key, id, offset, ts)
+					}
+					// do nothing since the existing entry in the index is newer
+					// than the one of the entry
+				} else {
+					// key doesn't exist; set the key 
+					db.idx.Set(e.Key, id, offset, ts)
+				}
+				offset += e.Size()
+			}
+
+			db.dfiles[id] = df
 		}(f.Name(), id)
 	}
 

@@ -2,6 +2,7 @@ package db
 
 import (
 	"bytes"
+	"time"
 	"encoding/gob"
 	"errors"
 	"sync"
@@ -25,13 +26,14 @@ func newKdir() *kdir {
 type kdirItem struct {
 	fileid int64
 	offset int64
+	timestamp int64
 }
 
-func (k *kdir) Set(key []byte, fileid, offset int64) {
+func (k *kdir) Set(key []byte, fileid, offset, ts int64) {
 	k.rw.Lock()
 	defer k.rw.Unlock()
 
-	k.mp[string(key)] = kdirItem{fileid, offset}
+	k.mp[string(key)] = kdirItem{fileid, offset, ts}
 }
 
 func (k *kdir) Get(key []byte) (kdirItem, error) {

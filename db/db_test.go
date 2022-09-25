@@ -147,3 +147,23 @@ func Test_manyDbOperations(t *testing.T) {
 		t.Fatalf("errors exist")
 	}
 }
+
+func Test_readid(t *testing.T) {
+	type tc struct {
+		fname string
+		expected int64
+	}
+
+	tcs := []tc{
+		{"123.data", 123},
+		{"90805911.data", 90805911},
+		{"1231231233.hint", 1231231233},
+		{"INVALID_ID", 0},
+	}
+
+	for idx, tc := range tcs {
+		if db.ReadID(tc.fname) != tc.expected {
+			t.Fatalf("test %d failed: got %d", idx, db.ReadID(tc.fname))
+		}
+	}
+}
