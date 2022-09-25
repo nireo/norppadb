@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/hashicorp/raft"
 	"github.com/nireo/norppadb/store"
+	"github.com/stretchr/testify/require"
 )
 
 func getFreePort() (int, error) {
@@ -73,4 +75,52 @@ func TestMultipleNodes(t *testing.T) {
 		}
 		stores = append(stores, store)
 	}
+
+	type pr struct {
+		Key   []byte
+		Value []byte
+	}
+
+	pairs := []pr{
+		{Key: []byte("hello"), Value: []byte("world")},
+		{Key: []byte("world"), Value: []byte("hello")},
+	}
+
+	for _, p := range pairs {
+		if err := stores[0].Put(p.Key, p.Value); err != nil {
+			t.Fatal(err)
+		}
+
+		require.Eventually(t, func() bool {
+			for j := 0; j < nodeCount; j++ {
+				val, err := stores[j].Get(p.Key)
+				if err != nil {
+					return false
+				}
+
+				if !bytes.Equal(val, p.Value) {
+					return false
+				}
+			}
+			return true
+		}, 500*time.Millisecond, 50*time.Millisecond)
+	}
+
+	err := stores[0].Leave("1")
+	require.NoError(t, err)
+
+	time.Sleep(50 * time.Millisecond)
+
+	err = stores[0].Put([]byte("hellohello"), []byte("worldworld"))
+	require.NoError(t, err)
+
+	time.Sleep(50 * time.Millisecond)
+
+	val, err := stores[1].Get([]byte("hellohello"))
+	require.Error(t, err)
+	require.Nil(t, val)
+
+	val, err = stores[2].Get([]byte("hellohello"))
+	require.NoError(t, err)
+	require.Equal(t, val, []byte("worldworld"))
 }
