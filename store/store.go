@@ -38,6 +38,7 @@ type Config struct {
 		Bootstrap         bool
 		SnapshotThreshold uint64
 		StrongConsistency bool
+		BindAddr string
 	}
 }
 
@@ -57,7 +58,6 @@ type Store struct {
 	db       *db.DB // the internal database of a node
 	raftdir  string
 	datadir  string
-	bindaddr string
 	nt       *raft.NetworkTransport
 }
 
@@ -71,8 +71,8 @@ type applyRes struct {
 }
 
 // dir is the datadir which contains raft data and database data
-func New(dir, bind string) (*Store, error) {
-	st := &Store{bindaddr: bind}
+func New(dir string, conf *Config) (*Store, error) {
+	st := &Store{conf: conf}
 	if err := st.setupdb(dir); err != nil {
 		return nil, err
 	}
@@ -102,12 +102,12 @@ func (s *Store) setupraft(dir string) error {
 	}
 	s.raftdir = raftDir
 
-	addr, err := net.ResolveTCPAddr("tcp", s.bindaddr)
+	addr, err := net.ResolveTCPAddr("tcp", s.conf.Raft.BindAddr)
 	if err != nil {
 		return err
 	}
 
-	transport, err := raft.NewTCPTransport(s.bindaddr, addr, maxPool, raftTimeout, os.Stderr)
+	transport, err := raft.NewTCPTransport(s.conf.Raft.BindAddr, addr, maxPool, raftTimeout, os.Stderr)
 	if err != nil {
 		return err
 	}
@@ -156,7 +156,7 @@ func (s *Store) setupraft(dir string) error {
 		conf := raft.Configuration{
 			Servers: []raft.Server{{
 				ID:      config.LocalID,
-				Address: s.nt.LocalAddr(),
+				Address: raft.ServerAddress(s.conf.Raft.BindAddr),
 			}},
 		}
 		err = s.raft.BootstrapCluster(conf).Error()
