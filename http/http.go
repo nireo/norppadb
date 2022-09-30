@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"strings"
 
@@ -20,6 +21,7 @@ type Server struct {
 	addr      string
 	closeChan chan struct{}
 	lgr       *log.Logger
+	debug     bool
 }
 
 func New(addr string, store store.RaftStore) *Server {
@@ -108,6 +110,24 @@ func (s *Server) put(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) debugpprof(w http.ResponseWriter, r *http.Request) {
+	if !s.debug {
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
+	}
+
+	switch r.URL.Path {
+	case "/debug/pprof/cmdline":
+		pprof.Cmdline(w, r)
+	case "/debug/pprof/profile":
+		pprof.Profile(w, r)
+	case "/debug/pprof/symbol":
+		pprof.Symbol(w, r)
+	default:
+		pprof.Index(w, r)
+	}
 }
 
 func (s *Server) join(w http.ResponseWriter, r *http.Request) {
@@ -211,6 +231,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if strings.HasPrefix(r.URL.Path, "/leave") {
 		s.leave(w, r)
+		return
+	}
+
+	if strings.HasPrefix(r.URL.Path, "/debug/pprof") {
+		s.debugpprof(w, r)
 		return
 	}
 
