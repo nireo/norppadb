@@ -35,16 +35,17 @@ func init() {
 func main() {
 	flag.Parse()
 	// create store
-	config := &store.Config{}
-	config.Raft.BindAddr = raftbind
-	config.Raft.LocalID = raft.ServerID(nodeid)
-	config.Raft.HeartbeatTimeout = 50 * time.Millisecond
-	config.Raft.ElectionTimeout = 50 * time.Millisecond
-	config.Raft.LeaderLeaseTimeout = 50 * time.Millisecond
-	config.Raft.CommitTimeout = 5 * time.Millisecond
-	config.Raft.SnapshotThreshold = 4096
+	config := store.Config{}
+	config.BindAddr = raftbind
+	config.LocalID = raft.ServerID(nodeid)
+	config.HeartbeatTimeout = 50 * time.Millisecond
+	config.ElectionTimeout = 50 * time.Millisecond
+	config.LeaderLeaseTimeout = 50 * time.Millisecond
+	config.CommitTimeout = 5 * time.Millisecond
+	config.SnapshotThreshold = 4096
+
 	if join == "" {
-		config.Raft.Bootstrap = true
+		config.Bootstrap = true
 	}
 
 	st, err := store.New(datadir, config)
@@ -73,11 +74,9 @@ func main() {
 			panic(err)
 		}
 		defer resp.Body.Close()
-		if req.Response.StatusCode != http.StatusOK {
+		if resp.StatusCode != http.StatusOK {
 			log.Fatalf("failed sending join request, got code: %d", req.Response.StatusCode)
 		}
-		// send a HTTP-request to raft leader to join the cluster.
-		return
 	}
 
 	// create http server

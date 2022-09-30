@@ -55,6 +55,7 @@ func TestMultipleNodes(t *testing.T) {
 		config.Raft.CommitTimeout = 5 * time.Millisecond
 		config.Raft.SnapshotThreshold = 4096
 		config.Raft.LogOutput = io.Discard
+		config.Raft.Logger = nil
 
 		if i == 0 {
 			config.Raft.Bootstrap = true

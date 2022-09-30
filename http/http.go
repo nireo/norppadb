@@ -140,6 +140,8 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.lgr.Printf("received request from node with ID %s, at %s, to join this node", id, addr)
+
 	if err := s.store.Join(id.(string), addr.(string)); err != nil {
 		if err == store.ErrNotLeader {
 			leaderAddr := s.store.LeaderAddr()

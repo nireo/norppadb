@@ -34,13 +34,15 @@ var (
 )
 
 type Config struct {
-	Raft struct {
-		raft.Config
-		Bootstrap         bool
-		SnapshotThreshold uint64
-		StrongConsistency bool
-		BindAddr          string
-	}
+	Bootstrap          bool
+	SnapshotThreshold  uint64
+	StrongConsistency  bool
+	BindAddr           string
+	CommitTimeout      time.Duration
+	LocalID            raft.ServerID
+	HeartbeatTimeout   time.Duration
+	ElectionTimeout    time.Duration
+	LeaderLeaseTimeout time.Duration
 }
 
 type RaftStore interface {
@@ -53,7 +55,7 @@ type RaftStore interface {
 }
 
 type Store struct {
-	conf    *Config
+	conf    Config
 	raft    *raft.Raft
 	db      *db.DB // the internal database of a node
 	raftdir string
@@ -71,17 +73,82 @@ type applyRes struct {
 }
 
 // dir is the datadir which contains raft data and database data
-func New(dir string, conf *Config) (*Store, error) {
-	st := &Store{conf: conf}
+func New(dir string, conf Config) (*Store, error) {
+	st := &Store{}
 	if err := st.setupdb(dir); err != nil {
 		return nil, err
 	}
+	st.logger = log.New(os.Stdout, "[store] ", log.LstdFlags)
 
-	if err := st.setupraft(dir); err != nil {
+	raftDir := filepath.Join(dir, "raft")
+	if err := os.MkdirAll(raftDir, os.ModePerm); err != nil {
 		return nil, err
 	}
-	st.logger = log.New(os.Stdout, "[store]", log.LstdFlags)
-	return st, nil
+	st.raftdir = raftDir
+
+	st.logger.Printf("binding raft on addr: %s", conf.BindAddr)
+
+	addr, err := net.ResolveTCPAddr("tcp", conf.BindAddr)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("addr: %v", addr.String())
+
+	transport, err := raft.NewTCPTransport(conf.BindAddr, addr, maxPool, raftTimeout, os.Stderr)
+	if err != nil {
+		return nil, err
+	}
+
+	stableStore, err := raftboltdb.NewBoltStore(filepath.Join(raftDir, "raft.db"))
+	if err != nil {
+		return nil, err
+	}
+
+	snapshotStore, err := raft.NewFileSnapshotStore(raftDir, 1, os.Stderr)
+	if err != nil {
+		return nil, err
+	}
+
+	config := raft.DefaultConfig()
+	config.SnapshotThreshold = conf.SnapshotThreshold
+	config.LocalID = conf.LocalID
+
+	if conf.HeartbeatTimeout != 0 {
+		config.HeartbeatTimeout = conf.HeartbeatTimeout
+	}
+
+	if conf.ElectionTimeout != 0 {
+		config.ElectionTimeout = conf.ElectionTimeout
+	}
+
+	if conf.LeaderLeaseTimeout != 0 {
+		config.LeaderLeaseTimeout = conf.LeaderLeaseTimeout
+	}
+
+	if conf.CommitTimeout != 0 {
+		config.CommitTimeout = conf.CommitTimeout
+	}
+
+	st.raft, err = raft.NewRaft(config, st, stableStore, stableStore, snapshotStore, transport)
+	if err != nil {
+		return nil, err
+	}
+
+	hasState, err := raft.HasExistingState(stableStore, stableStore, snapshotStore)
+	if err != nil {
+		return nil, err
+	}
+
+	if conf.Bootstrap && !hasState {
+		conf := raft.Configuration{
+			Servers: []raft.Server{{
+				ID:      config.LocalID,
+				Address: raft.ServerAddress(conf.BindAddr),
+			}},
+		}
+		err = st.raft.BootstrapCluster(conf).Error()
+	}
+	return st, err
 }
 
 func (s *Store) setupdb(dir string) error {
@@ -92,75 +159,6 @@ func (s *Store) setupdb(dir string) error {
 	s.datadir = dbPath
 	var err error
 	s.db, err = db.Open(dbPath)
-	return err
-}
-
-func (s *Store) setupraft(dir string) error {
-	raftDir := filepath.Join(dir, "raft")
-	if err := os.MkdirAll(raftDir, os.ModePerm); err != nil {
-		return err
-	}
-	s.raftdir = raftDir
-
-	addr, err := net.ResolveTCPAddr("tcp", s.conf.Raft.BindAddr)
-	if err != nil {
-		return err
-	}
-
-	transport, err := raft.NewTCPTransport(s.conf.Raft.BindAddr, addr, maxPool, raftTimeout, os.Stderr)
-	if err != nil {
-		return err
-	}
-
-	stableStore, err := raftboltdb.NewBoltStore(filepath.Join(raftDir, "raft.db"))
-	if err != nil {
-		return err
-	}
-
-	snapshotStore, err := raft.NewFileSnapshotStore(raftDir, 1, os.Stderr)
-	if err != nil {
-		return err
-	}
-
-	config := raft.DefaultConfig()
-	config.SnapshotThreshold = s.conf.Raft.SnapshotThreshold
-	config.LocalID = s.conf.Raft.LocalID
-
-	if s.conf.Raft.HeartbeatTimeout != 0 {
-		config.HeartbeatTimeout = s.conf.Raft.HeartbeatTimeout
-	}
-
-	if s.conf.Raft.ElectionTimeout != 0 {
-		config.ElectionTimeout = s.conf.Raft.ElectionTimeout
-	}
-
-	if s.conf.Raft.LeaderLeaseTimeout != 0 {
-		config.LeaderLeaseTimeout = s.conf.Raft.LeaderLeaseTimeout
-	}
-
-	if s.conf.Raft.CommitTimeout != 0 {
-		config.CommitTimeout = s.conf.Raft.CommitTimeout
-	}
-
-	s.raft, err = raft.NewRaft(config, s, stableStore, stableStore, snapshotStore, transport)
-	if err != nil {
-		return err
-	}
-
-	hasState, err := raft.HasExistingState(stableStore, stableStore, snapshotStore)
-	if err != nil {
-		return err
-	}
-
-	if s.conf.Raft.Bootstrap && !hasState {
-		conf := raft.Configuration{
-			Servers: []raft.Server{{
-				ID:      config.LocalID,
-				Address: raft.ServerAddress(s.conf.Raft.BindAddr),
-			}},
-		}
-		err = s.raft.BootstrapCluster(conf).Error()
-	}
 	return err
 }
 
@@ -254,15 +252,17 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) Leave(id string) error {
+	s.logger.Printf("received request to remove node %s", id)
 	if !s.IsLeader() {
 		return ErrNotLeader
 	}
-	f := s.raft.RemoveServer(raft.ServerID(id), 0, 0)
-	if f.Error() != nil {
-		if f.Error() == raft.ErrNotLeader {
-			return ErrNotLeader
-		}
+
+	if err := s.remove(id); err != nil {
+		s.logger.Printf("failed to remove node %s: %s", id, err.Error())
+		return err
 	}
+
+	s.logger.Printf("node %s removed successfully", id)
 	return nil
 }
 
@@ -293,6 +293,22 @@ func (s *Store) apply(ty Action_ACTION_TYPE, key, value []byte) (any, error) {
 	return r, nil
 }
 
+func (s *Store) remove(id string) error {
+	if !s.IsLeader() {
+		return ErrNotLeader
+	}
+
+	f := s.raft.RemoveServer(raft.ServerID(id), 0, 0)
+	if f.Error() != nil {
+		if f.Error() == raft.ErrNotLeader {
+			return ErrNotLeader
+		}
+		return f.Error()
+	}
+
+	return nil
+}
+
 // Join handles a given node joining the whole raft cluster. The joining has to be done
 // using the leader node.
 func (s *Store) Join(id, addr string) error {
@@ -303,7 +319,7 @@ func (s *Store) Join(id, addr string) error {
 	}
 	serverID := raft.ServerID(id)
 	serverAddr := raft.ServerAddress(addr)
-	if serverID == s.conf.Raft.LocalID {
+	if serverID == s.conf.LocalID {
 		return ErrJoinSelf
 	}
 
@@ -318,10 +334,13 @@ func (s *Store) Join(id, addr string) error {
 			if srv.ID == serverID && srv.Address == serverAddr {
 				return nil
 			}
-			removeFuture := s.raft.RemoveServer(serverID, 0, 0)
-			if err := removeFuture.Error(); err != nil {
+
+			if err := s.remove(id); err != nil {
+				s.logger.Printf("failed to remove node %s: %v", id, err)
 				return err
 			}
+
+			s.logger.Printf("removed node %s prior to rejoin with changed ID or addr", id)
 		}
 	}
 
@@ -330,16 +349,15 @@ func (s *Store) Join(id, addr string) error {
 		if err == raft.ErrNotLeader {
 			return ErrNotLeader
 		}
-
-		return err
+		return addf.Error()
 	}
-
+	s.logger.Printf("node with ID %s, at %s, joined successfully", id, addr)
 	return nil
 }
 
 func (s *Store) Get(key []byte) ([]byte, error) {
 	// query from the leader
-	if s.conf.Raft.StrongConsistency {
+	if s.conf.StrongConsistency {
 		if !s.IsLeader() {
 			return nil, ErrNotLeader
 		}
