@@ -7,6 +7,7 @@ package store
 import (
 	"errors"
 	"io"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -57,7 +58,7 @@ type Store struct {
 	db      *db.DB // the internal database of a node
 	raftdir string
 	datadir string
-	nt      *raft.NetworkTransport
+	logger  *log.Logger
 }
 
 type snapshot struct {
@@ -79,7 +80,7 @@ func New(dir string, conf *Config) (*Store, error) {
 	if err := st.setupraft(dir); err != nil {
 		return nil, err
 	}
-
+	st.logger = log.New(os.Stdout, "[store]", log.LstdFlags)
 	return st, nil
 }
 
@@ -292,7 +293,11 @@ func (s *Store) apply(ty Action_ACTION_TYPE, key, value []byte) (any, error) {
 	return r, nil
 }
 
+// Join handles a given node joining the whole raft cluster. The joining has to be done
+// using the leader node.
 func (s *Store) Join(id, addr string) error {
+	s.logger.Printf("received request from node with ID %s, at %s, to join this node", id, addr)
+	// only can join the leader
 	if !s.IsLeader() {
 		return ErrNotLeader
 	}
@@ -301,10 +306,13 @@ func (s *Store) Join(id, addr string) error {
 	if serverID == s.conf.Raft.LocalID {
 		return ErrJoinSelf
 	}
+
 	f := s.raft.GetConfiguration()
 	if err := f.Error(); err != nil {
+		s.logger.Printf("failed to get raft configuration: %v", err)
 		return err
 	}
+
 	for _, srv := range f.Configuration().Servers {
 		if srv.ID == serverID || srv.Address == serverAddr {
 			if srv.ID == serverID && srv.Address == serverAddr {
@@ -316,6 +324,7 @@ func (s *Store) Join(id, addr string) error {
 			}
 		}
 	}
+
 	addf := s.raft.AddVoter(serverID, serverAddr, 0, 0)
 	if err := addf.Error(); err != nil {
 		if err == raft.ErrNotLeader {
@@ -324,6 +333,7 @@ func (s *Store) Join(id, addr string) error {
 
 		return err
 	}
+
 	return nil
 }
 

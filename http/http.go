@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/nireo/norppadb/db"
@@ -18,6 +19,7 @@ type Server struct {
 	ln        net.Listener
 	addr      string
 	closeChan chan struct{}
+	lgr       *log.Logger
 }
 
 func New(addr string, store store.RaftStore) *Server {
@@ -25,6 +27,7 @@ func New(addr string, store store.RaftStore) *Server {
 		store:     store,
 		addr:      addr,
 		closeChan: make(chan struct{}),
+		lgr:       log.New(os.Stderr, "[http]", log.LstdFlags),
 	}
 }
 
@@ -63,7 +66,7 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Redirect(w, r,
-			fmt.Sprintf("%s%s", leaderAddr, r.URL.Path), http.StatusMovedPermanently)
+			fmt.Sprintf("http://%s%s", leaderAddr, r.URL.Path), http.StatusMovedPermanently)
 		return
 	}
 
@@ -96,7 +99,7 @@ func (s *Server) put(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			http.Redirect(w, r,
-				fmt.Sprintf("%s%s", leaderAddr, r.URL.Path), http.StatusMovedPermanently)
+				fmt.Sprintf("http://%s%s", leaderAddr, r.URL.Path), http.StatusMovedPermanently)
 			return
 		}
 
@@ -146,7 +149,7 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 			}
 
 			http.Redirect(w, r,
-				fmt.Sprintf("%s%s", leaderAddr, r.URL.Path), http.StatusMovedPermanently)
+				fmt.Sprintf("http://%s%s", leaderAddr, r.URL.Path), http.StatusMovedPermanently)
 			return
 		}
 
@@ -189,7 +192,7 @@ func (s *Server) leave(w http.ResponseWriter, r *http.Request) {
 			}
 
 			http.Redirect(w, r,
-				fmt.Sprintf("%s%s", leaderAddr, r.URL.Path), http.StatusMovedPermanently)
+				fmt.Sprintf("http://%s%s", leaderAddr, r.URL.Path), http.StatusMovedPermanently)
 			return
 		}
 

@@ -73,11 +73,9 @@ func main() {
 			panic(err)
 		}
 		defer resp.Body.Close()
-
 		if req.Response.StatusCode != http.StatusOK {
 			log.Fatalf("failed sending join request, got code: %d", req.Response.StatusCode)
 		}
-
 		// send a HTTP-request to raft leader to join the cluster.
 		return
 	}

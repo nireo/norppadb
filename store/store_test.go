@@ -3,6 +3,8 @@ package store_test
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"os"
 	"testing"
@@ -52,6 +54,7 @@ func TestMultipleNodes(t *testing.T) {
 		config.Raft.LeaderLeaseTimeout = 50 * time.Millisecond
 		config.Raft.CommitTimeout = 5 * time.Millisecond
 		config.Raft.SnapshotThreshold = 4096
+		config.Raft.LogOutput = io.Discard
 
 		if i == 0 {
 			config.Raft.Bootstrap = true
@@ -123,4 +126,6 @@ func TestMultipleNodes(t *testing.T) {
 	val, err = stores[2].Get([]byte("hellohello"))
 	require.NoError(t, err)
 	require.Equal(t, val, []byte("worldworld"))
+
+	log.Println(stores[0].LeaderAddr())
 }
