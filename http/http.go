@@ -88,6 +88,17 @@ func (s *Server) Start() error {
 	return nil
 }
 
+func (s *Server) redirectUrl(r *http.Request, addr string) string {
+	var scheme string
+	if s.HTTPS() {
+		scheme = "https"
+	} else {
+		scheme = "http"
+	}
+
+	return fmt.Sprintf("%s://%s%s", scheme, addr, r.URL.Path)
+}
+
 func makeconf(cert, key, cacert string) (*tls.Config, error) {
 	config := &tls.Config{
 		NextProtos: []string{"h2", "http/1.1"},
@@ -131,8 +142,7 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
-		http.Redirect(w, r,
-			fmt.Sprintf("http://%s%s", leaderAddr, r.URL.Path), http.StatusMovedPermanently)
+		http.Redirect(w, r, s.redirectUrl(r, leaderAddr), http.StatusMovedPermanently)
 		return
 	}
 
@@ -164,8 +174,7 @@ func (s *Server) put(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
-			http.Redirect(w, r,
-				fmt.Sprintf("http://%s%s", leaderAddr, r.URL.Path), http.StatusMovedPermanently)
+			http.Redirect(w, r, s.redirectUrl(r, leaderAddr), http.StatusMovedPermanently)
 			return
 		}
 
@@ -233,9 +242,7 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "leader not found", http.StatusInternalServerError)
 				return
 			}
-
-			http.Redirect(w, r,
-				fmt.Sprintf("http://%s%s", leaderAddr, r.URL.Path), http.StatusMovedPermanently)
+			http.Redirect(w, r, s.redirectUrl(r, leaderAddr), http.StatusMovedPermanently)
 			return
 		}
 
@@ -277,8 +284,7 @@ func (s *Server) leave(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			http.Redirect(w, r,
-				fmt.Sprintf("http://%s%s", leaderAddr, r.URL.Path), http.StatusMovedPermanently)
+			http.Redirect(w, r, s.redirectUrl(r, leaderAddr), http.StatusMovedPermanently)
 			return
 		}
 

@@ -212,7 +212,7 @@ func (s *snapshot) Persist(sink raft.SnapshotSink) error {
 	return sink.Close()
 }
 
-func (s *snapshot) Release() {
+func (s *Store) Release() {
 }
 
 func (s *Store) LeaderAddr() string {
