@@ -1,6 +1,8 @@
 package http
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,7 +23,13 @@ type Server struct {
 	addr      string
 	closeChan chan struct{}
 	lgr       *log.Logger
-	debug     bool
+	debug     bool // whether to enable debugging routes such as '/debug/pprof'
+
+	// these are public so we can easily configure them without having more
+	// function params
+	Certfile   string
+	Cacertfile string
+	Keyfile    string
 }
 
 func New(addr string, store store.RaftStore) *Server {
@@ -33,24 +41,80 @@ func New(addr string, store store.RaftStore) *Server {
 	}
 }
 
+// Start starts listening on the wanted address. It also handles creating a
+// a TLS config if Certfiles, etc... are provided.
 func (s *Server) Start() error {
 	server := http.Server{
 		Handler: s,
 	}
 
-	var err error
-	s.ln, err = net.Listen("tcp", s.addr)
-	if err != nil {
-		return err
+	var (
+		ln  net.Listener
+		err error
+	)
+
+	if s.Cacertfile == "" || s.Keyfile == "" {
+		// TLS not enabled, scheme is HTTP
+		ln, err = net.Listen("tcp", s.addr)
+		if err != nil {
+			return err
+		}
+	} else {
+		// TLS enabled, scheme is HTTPS
+		conf, err := makeconf(s.Certfile, s.Keyfile, s.Cacertfile)
+		if err != nil {
+			return err
+		}
+
+		ln, err = tls.Listen("tcp", s.addr, conf)
+		if err != nil {
+			return err
+		}
+
+		s.lgr.Printf("started a HTTPS server")
 	}
+
+	s.ln = ln
+	s.closeChan = make(chan struct{})
 
 	go func() {
 		// start listening on thread
 		if err := server.Serve(s.ln); err != nil {
-			log.Printf("failed to read listener")
+			s.lgr.Printf("failed to start listening")
 		}
 	}()
+	s.lgr.Printf("listening on %s", s.addr)
+
 	return nil
+}
+
+func makeconf(cert, key, cacert string) (*tls.Config, error) {
+	config := &tls.Config{
+		NextProtos: []string{"h2", "http/1.1"},
+		MinVersion: tls.VersionTLS12,
+	}
+
+	config.Certificates = make([]tls.Certificate, 1)
+	var err error
+	config.Certificates[0], err = tls.LoadX509KeyPair(cert, key)
+	if err != nil {
+		return nil, err
+	}
+
+	if cacert != "" {
+		ans, err := os.ReadFile(cacert)
+		if err != nil {
+			return nil, err
+		}
+
+		config.RootCAs = x509.NewCertPool()
+
+		if ok := config.RootCAs.AppendCertsFromPEM(ans); !ok {
+			return nil, fmt.Errorf("failed to parse root certificate in %q", cacert)
+		}
+	}
+
+	return config, nil
 }
 
 func (s *Server) get(w http.ResponseWriter, r *http.Request) {
@@ -221,6 +285,15 @@ func (s *Server) leave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+}
+
+func (s *Server) Close() {
+	close(s.closeChan)
+	s.ln.Close()
+}
+
+func (s *Server) HTTPS() bool {
+	return s.Cacertfile != "" && s.Keyfile != ""
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
