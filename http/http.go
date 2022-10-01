@@ -287,6 +287,10 @@ func (s *Server) leave(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) Addr() net.Addr {
+	return s.ln.Addr()
+}
+
 func (s *Server) Close() {
 	close(s.closeChan)
 	s.ln.Close()
