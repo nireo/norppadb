@@ -1,5 +1,7 @@
 # norppadb
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/nireo/norppadb)](https://goreportcard.com/report/github.com/nireo/norppadb)
+
 A fast key-value storage with predictable performance. The internal database design resembels bitcask, which means key meta-data is stored in memory for faster look-ups. The downside of this is that the keys will have to fit into memory.
 
 Distribution is handled by the Raft consensus algorithm and a simple HTTP server is provided to interact with the Raft store.

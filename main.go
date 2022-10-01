@@ -35,7 +35,7 @@ func init() {
 func main() {
 	flag.Parse()
 	// create store
-	config := store.Config{}
+	config := &store.Config{}
 	config.BindAddr = raftbind
 	config.LocalID = raft.ServerID(nodeid)
 	config.HeartbeatTimeout = 50 * time.Millisecond

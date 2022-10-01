@@ -55,7 +55,7 @@ type RaftStore interface {
 }
 
 type Store struct {
-	conf    Config
+	conf    *Config
 	raft    *raft.Raft
 	db      *db.DB // the internal database of a node
 	raftdir string
@@ -73,7 +73,7 @@ type applyRes struct {
 }
 
 // dir is the datadir which contains raft data and database data
-func New(dir string, conf Config) (*Store, error) {
+func New(dir string, conf *Config) (*Store, error) {
 	st := &Store{}
 	if err := st.setupdb(dir); err != nil {
 		return nil, err

@@ -3,7 +3,6 @@ package store_test
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -47,16 +46,16 @@ func TestMultipleNodes(t *testing.T) {
 			os.RemoveAll(dir)
 		}(datadir)
 		config := &store.Config{}
-		config.Raft.BindAddr = fmt.Sprintf("localhost:%d", ports[i])
-		config.Raft.LocalID = raft.ServerID(fmt.Sprintf("%d", i))
-		config.Raft.HeartbeatTimeout = 50 * time.Millisecond
-		config.Raft.ElectionTimeout = 50 * time.Millisecond
-		config.Raft.LeaderLeaseTimeout = 50 * time.Millisecond
-		config.Raft.CommitTimeout = 5 * time.Millisecond
-		config.Raft.SnapshotThreshold = 4096
+		config.BindAddr = fmt.Sprintf("localhost:%d", ports[i])
+		config.LocalID = raft.ServerID(fmt.Sprintf("%d", i))
+		config.HeartbeatTimeout = 50 * time.Millisecond
+		config.ElectionTimeout = 50 * time.Millisecond
+		config.LeaderLeaseTimeout = 50 * time.Millisecond
+		config.CommitTimeout = 5 * time.Millisecond
+		config.SnapshotThreshold = 4096
 
 		if i == 0 {
-			config.Raft.Bootstrap = true
+			config.Bootstrap = true
 		}
 
 		store, err := store.New(datadir, config)
@@ -65,7 +64,7 @@ func TestMultipleNodes(t *testing.T) {
 		}
 
 		if i != 0 {
-			err = stores[0].Join(fmt.Sprintf("%d", i), config.Raft.BindAddr)
+			err = stores[0].Join(fmt.Sprintf("%d", i), config.BindAddr)
 			if err != nil {
 				t.Fatal(err)
 			}
