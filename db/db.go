@@ -14,6 +14,11 @@ const MaxKeySize int = 128             // 128 bytes
 const MaxValueSize int = (1 << 16) - 1 // 65kb
 const MaxFileSize int64 = 1 << 21      // 2mb
 
+type Database interface {
+	Put(key []byte, value []byte) error
+	Get(key []byte) ([]byte, error)
+}
+
 // DB contains the logic for handling the database
 type DB struct {
 	dir    string
