@@ -74,7 +74,7 @@ type applyRes struct {
 
 // dir is the datadir which contains raft data and database data
 func New(dir string, conf *Config) (*Store, error) {
-	st := &Store{}
+	st := &Store{conf: conf}
 	if err := st.setupdb(dir); err != nil {
 		return nil, err
 	}
@@ -201,14 +201,14 @@ func (s *Store) Put(key, value []byte) error {
 }
 
 func (f *Store) Snapshot() (raft.FSMSnapshot, error) {
-	return &snapshot{db: f.db}, nil
+	return f, nil
 }
 
 func (f *Store) Restore(snapshot io.ReadCloser) error {
 	return nil
 }
 
-func (s *snapshot) Persist(sink raft.SnapshotSink) error {
+func (f *Store) Persist(sink raft.SnapshotSink) error {
 	return sink.Close()
 }
 

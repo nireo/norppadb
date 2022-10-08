@@ -146,6 +146,11 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if val == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
 	w.Write(val)
 	w.WriteHeader(http.StatusOK)
 }
