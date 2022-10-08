@@ -5,6 +5,8 @@
 package store
 
 import (
+	"bytes"
+	"compress/gzip"
 	"errors"
 	"io"
 	"log"
@@ -13,6 +15,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/dgraph-io/badger/v3"
 	"github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb"
 	"github.com/nireo/norppadb/db"
@@ -57,14 +60,10 @@ type RaftStore interface {
 type Store struct {
 	conf    *Config
 	raft    *raft.Raft
-	db      *db.DB // the internal database of a node
+	db      *db.BadgerBackend
 	raftdir string
 	datadir string
 	logger  *log.Logger
-}
-
-type snapshot struct {
-	db *db.DB
 }
 
 type applyRes struct {
@@ -158,7 +157,7 @@ func (s *Store) setupdb(dir string) error {
 	}
 	s.datadir = dbPath
 	var err error
-	s.db, err = db.Open(dbPath)
+	s.db, err = db.NewBadgerBackend(dbPath)
 	return err
 }
 
@@ -200,19 +199,80 @@ func (s *Store) Put(key, value []byte) error {
 	return r.err
 }
 
-func (f *Store) Snapshot() (raft.FSMSnapshot, error) {
-	return f, nil
+type snapshot struct {
+	start        time.Time
+	lastSnapshot time.Time
+	db           *badger.DB
 }
 
-func (f *Store) Restore(snapshot io.ReadCloser) error {
+func (f *Store) Snapshot() (raft.FSMSnapshot, error) {
+	return &snapshot{
+		db:           f.db.DB,
+		start:        time.Now(),
+		lastSnapshot: f.db.LastSnapshot,
+	}, nil
+}
+
+func (f *Store) Restore(rc io.ReadCloser) error {
+	b, err := io.ReadAll(rc)
+	if err != nil {
+		return err
+	}
+
+	buf := new(bytes.Buffer)
+	gz, err := gzip.NewReader(rc)
+	if err != nil {
+		return err
+	}
+
+	if _, err := io.Copy(buf, gz); err != nil {
+		return err
+	}
+
+	if err := gz.Close(); err != nil {
+		return err
+	}
+
+	return f.db.Load(bytes.NewReader(buf.Bytes()))
+}
+
+func (f *snapshot) Persist(sink raft.SnapshotSink) error {
+	err := func() error {
+		var buf1 bytes.Buffer
+		_, err := f.db.Backup(&buf1, uint64(f.lastSnapshot.Unix()))
+		if err != nil {
+			return err
+		}
+
+		var buf bytes.Buffer
+		gz, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+		if err != nil {
+			return err
+		}
+
+		if _, err := gz.Write(buf1.Bytes()); err != nil {
+			return err
+		}
+
+		if err := gz.Close(); err != nil {
+			return err
+		}
+
+		if _, err := sink.Write(buf.Bytes()); err != nil {
+			return err
+		}
+
+		return sink.Close()
+	}()
+
+	if err != nil {
+		sink.Cancel()
+		return err
+	}
 	return nil
 }
 
-func (f *Store) Persist(sink raft.SnapshotSink) error {
-	return sink.Close()
-}
-
-func (s *Store) Release() {
+func (s *snapshot) Release() {
 }
 
 func (s *Store) LeaderAddr() string {
