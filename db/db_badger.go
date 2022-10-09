@@ -12,6 +12,11 @@ type BadgerBackend struct {
 	LastSnapshot time.Time
 }
 
+type KVPair struct {
+	Key   []byte
+	Value []byte
+}
+
 func NewBadgerBackend(path string) (*BadgerBackend, error) {
 	db, err := badger.Open(badger.DefaultOptions(path))
 	if err != nil {
@@ -67,4 +72,72 @@ func (b *BadgerBackend) Backup(w io.Writer) error {
 
 func (b *BadgerBackend) Load(r io.Reader) error {
 	return b.DB.Load(r, 4)
+}
+
+func (b *BadgerBackend) BatchWrite(pairs []*KVPair) error {
+	batch := b.DB.NewWriteBatch()
+	defer batch.Cancel()
+
+	for i := range pairs {
+		entry := badger.NewEntry(pairs[i].Key, pairs[i].Value)
+		if err := batch.SetEntry(entry); err != nil {
+			return err
+		}
+	}
+
+	return batch.Flush()
+}
+
+func (b *BadgerBackend) BatchGet(keys [][]byte) ([]*KVPair, error) {
+	res := make([]*KVPair, 0)
+
+	for i := range keys {
+		val, err := b.Get(keys[i])
+		if err != nil || val == nil {
+			continue
+		}
+
+		res = append(res, &KVPair{
+			Key:   keys[i],
+			Value: val,
+		})
+	}
+	return res, nil
+}
+
+func (b *BadgerBackend) PrefixScan(prefix []byte) ([]*KVPair, error) {
+	res := make([]*KVPair, 0)
+
+	b.DB.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		prefix := []byte("1234")
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+
+			v, err := item.ValueCopy(nil)
+			if err != nil {
+				return err
+			}
+
+			res = append(res, &KVPair{
+				Key:   item.KeyCopy(nil),
+				Value: v,
+			})
+		}
+		return nil
+	})
+
+	return res, nil
+}
+
+func (b *BadgerBackend) GarbageCollector() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+	again:
+		if err := b.DB.RunValueLogGC(0.7); err == nil {
+			goto again
+		}
+	}
 }

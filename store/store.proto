@@ -14,6 +14,11 @@ message Action {
   ACTION_TYPE type = 3;
 }
 
+message KVPair {
+  bytes key = 1;
+  bytes value = 2;
+}
+
 message Server {
   string id = 1;
   string rpc_addr = 2;
