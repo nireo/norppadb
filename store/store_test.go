@@ -28,6 +28,50 @@ func getFreePort() (int, error) {
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
+func newStore(t *testing.T, port, id int, bootstrap bool) (*store.Store, error) {
+	datadir, err := os.MkdirTemp("", "store-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		os.RemoveAll(datadir)
+	})
+	config := &store.Config{}
+	config.BindAddr = fmt.Sprintf("localhost:%d", port)
+	config.LocalID = raft.ServerID(fmt.Sprintf("%d", id))
+	config.HeartbeatTimeout = 50 * time.Millisecond
+	config.ElectionTimeout = 50 * time.Millisecond
+	config.LeaderLeaseTimeout = 50 * time.Millisecond
+	config.CommitTimeout = 5 * time.Millisecond
+	config.SnapshotThreshold = 10000
+	config.Bootstrap = bootstrap
+
+	return store.New(datadir, config)
+}
+
+func waitForLeaderID(s *store.Store, timeout time.Duration) (string, error) {
+	tck := time.NewTicker(100 * time.Millisecond)
+	defer tck.Stop()
+	tmr := time.NewTimer(timeout)
+	defer tmr.Stop()
+
+	for {
+		select {
+		case <-tck.C:
+			id, err := s.LeaderID()
+			if err != nil {
+				return "", err
+			}
+			if id != "" {
+				return id, nil
+			}
+		case <-tmr.C:
+			return "", fmt.Errorf("timeout expired")
+		}
+	}
+}
+
 func TestMultipleNodes(t *testing.T) {
 	var stores []*store.Store
 	nodeCount := 3
@@ -38,33 +82,13 @@ func TestMultipleNodes(t *testing.T) {
 	}
 
 	for i := 0; i < nodeCount; i++ {
-		datadir, err := os.MkdirTemp("", "store-test")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func(dir string) {
-			os.RemoveAll(dir)
-		}(datadir)
-		config := &store.Config{}
-		config.BindAddr = fmt.Sprintf("localhost:%d", ports[i])
-		config.LocalID = raft.ServerID(fmt.Sprintf("%d", i))
-		config.HeartbeatTimeout = 50 * time.Millisecond
-		config.ElectionTimeout = 50 * time.Millisecond
-		config.LeaderLeaseTimeout = 50 * time.Millisecond
-		config.CommitTimeout = 5 * time.Millisecond
-		config.SnapshotThreshold = 4096
-
-		if i == 0 {
-			config.Bootstrap = true
-		}
-
-		store, err := store.New(datadir, config)
+		store, err := newStore(t, ports[i], i, i == 0)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		if i != 0 {
-			err = stores[0].Join(fmt.Sprintf("%d", i), config.BindAddr)
+			err = stores[0].Join(fmt.Sprintf("%d", i), fmt.Sprintf("localhost:%d", ports[i]))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -126,4 +150,24 @@ func TestMultipleNodes(t *testing.T) {
 	require.Equal(t, val, []byte("worldworld"))
 
 	log.Println(stores[0].LeaderAddr())
+}
+
+func TestSingleNode(t *testing.T) {
+	port, err := getFreePort()
+	require.NoError(t, err)
+
+	store, err := newStore(t, port, 1, true)
+	require.NoError(t, err)
+
+	store.WaitForLeader(3 * time.Second)
+
+	require.True(t, store.IsLeader())
+
+	err = store.Put([]byte("hello"), []byte("world"))
+	require.NoError(t, err)
+
+	val, err := store.Get([]byte("hello"))
+	require.NoError(t, err)
+
+	require.Equal(t, val, []byte("world"))
 }

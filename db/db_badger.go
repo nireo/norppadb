@@ -7,9 +7,14 @@ import (
 	"github.com/dgraph-io/badger/v3"
 )
 
+// We also want to support in memory databases for quick access to improve
+// the store implementation's performance. Sometimes the raft store wants to
+// just spin up a fast instance and not having to parse/write to source files
+// improves performance.
 type BadgerBackend struct {
 	DB           *badger.DB
 	LastSnapshot time.Time
+	IsMem        bool
 }
 
 type KVPair struct {
@@ -26,6 +31,20 @@ func NewBadgerBackend(path string) (*BadgerBackend, error) {
 	return &BadgerBackend{
 		DB:           db,
 		LastSnapshot: time.Now(),
+		IsMem:        false,
+	}, nil
+}
+
+func NewBadgerBackendMemory() (*BadgerBackend, error) {
+	db, err := badger.Open(badger.DefaultOptions("").WithInMemory(true))
+	if err != nil {
+		return nil, err
+	}
+
+	return &BadgerBackend{
+		DB:           db,
+		LastSnapshot: time.Now(),
+		IsMem:        true,
 	}, nil
 }
 
@@ -88,7 +107,11 @@ func (b *BadgerBackend) BatchWrite(pairs []*KVPair) error {
 	return batch.Flush()
 }
 
+// BatchGet tries to find all of the keys listed in the keys parameter. If a key is not
+// found, it will be ignored and the function will continue on to the next one.
 func (b *BadgerBackend) BatchGet(keys [][]byte) ([]*KVPair, error) {
+	// cannot really preallocate these since we wont know how many of them will
+	// exist
 	res := make([]*KVPair, 0)
 
 	for i := range keys {
@@ -105,6 +128,8 @@ func (b *BadgerBackend) BatchGet(keys [][]byte) ([]*KVPair, error) {
 	return res, nil
 }
 
+// PrefixScan finds all the keys in the database that starts with the given
+// prefix.
 func (b *BadgerBackend) PrefixScan(prefix []byte) ([]*KVPair, error) {
 	res := make([]*KVPair, 0)
 

@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -214,11 +215,6 @@ func (f *Store) Snapshot() (raft.FSMSnapshot, error) {
 }
 
 func (f *Store) Restore(rc io.ReadCloser) error {
-	b, err := io.ReadAll(rc)
-	if err != nil {
-		return err
-	}
-
 	buf := new(bytes.Buffer)
 	gz, err := gzip.NewReader(rc)
 	if err != nil {
@@ -447,4 +443,55 @@ func (s *Store) GetServers() ([]*Server, error) {
 		})
 	}
 	return servers, nil
+}
+
+func (s *Store) LeaderID() (string, error) {
+	addr := s.LeaderAddr()
+
+	conf := s.raft.GetConfiguration()
+	if err := conf.Error(); err != nil {
+		return "", err
+	}
+
+	for _, srv := range conf.Configuration().Servers {
+		if srv.Address == raft.ServerAddress(addr) {
+			return string(srv.ID), nil
+		}
+	}
+
+	return "", nil
+}
+
+func checkRaftConfig(conf raft.Configuration) error {
+	ids := make(map[raft.ServerID]bool)
+	addrs := make(map[raft.ServerAddress]bool)
+	var voters int
+
+	for _, srv := range conf.Servers {
+		if srv.ID == "" {
+			return fmt.Errorf("empty ID in configuration: %v", conf)
+		}
+		if srv.Address == "" {
+			return fmt.Errorf("empty address in configuration: %v", srv)
+		}
+		if ids[srv.ID] {
+			return fmt.Errorf("found duplicate ID in configuration: %v", srv.ID)
+		}
+
+		ids[srv.ID] = true
+		if addrs[srv.Address] {
+			return fmt.Errorf("found duplicate address in configuration: %v", srv.Address)
+		}
+
+		addrs[srv.Address] = true
+		if srv.Suffrage == raft.Voter {
+			voters++
+		}
+	}
+
+	if voters == 0 {
+		return fmt.Errorf("need at least one voter in config")
+	}
+
+	return nil
 }
