@@ -32,6 +32,7 @@ type Server struct {
 	Keyfile    string
 }
 
+// New creates the Server struct and helps to fill out some of the struct members.
 func New(addr string, store store.RaftStore) *Server {
 	return &Server{
 		store:     store,
@@ -39,6 +40,24 @@ func New(addr string, store store.RaftStore) *Server {
 		closeChan: make(chan struct{}),
 		lgr:       log.New(os.Stderr, "[http]", log.LstdFlags),
 	}
+}
+
+// EnableHTTPS takes in filepaths to certain files needed to establish a TLS server
+// It also checks that files exist.
+func (s *Server) EnableHTTPS(certfile, cacertfile, keyfile string) error {
+	files := []string{certfile, cacertfile, keyfile}
+	for _, f := range files {
+		if _, err := os.Stat(f); os.IsNotExist(err) {
+			return err
+		}
+	}
+
+	// all files exist at this point
+	s.Cacertfile = cacertfile
+	s.Keyfile = keyfile
+	s.Certfile = certfile
+
+	return nil
 }
 
 // Start starts listening on the wanted address. It also handles creating a
@@ -88,6 +107,9 @@ func (s *Server) Start() error {
 	return nil
 }
 
+// redirectUrl creates a given url to redirect to. It checks the scheme and the
+// request url. This function is used to redirect a given HTTP request to the
+// leader.
 func (s *Server) redirectUrl(r *http.Request, addr string) string {
 	var scheme string
 	if s.HTTPS() {
@@ -99,6 +121,7 @@ func (s *Server) redirectUrl(r *http.Request, addr string) string {
 	return fmt.Sprintf("%s://%s%s", scheme, addr, r.URL.Path)
 }
 
+// makeconf creates a tls.Config from the given file paths.
 func makeconf(cert, key, cacert string) (*tls.Config, error) {
 	config := &tls.Config{
 		NextProtos: []string{"h2", "http/1.1"},
@@ -133,7 +156,7 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 	if len(key) > db.MaxKeySize {
 		w.WriteHeader(http.StatusBadRequest)
 		return
-	}
+
 
 	val, err := s.store.Get(key)
 	if err != nil {
@@ -302,6 +325,7 @@ func (s *Server) Addr() net.Addr {
 	return s.ln.Addr()
 }
 
+	
 func (s *Server) Close() {
 	close(s.closeChan)
 	s.ln.Close()

@@ -156,6 +156,7 @@ func (b *BadgerBackend) PrefixScan(prefix []byte) ([]*KVPair, error) {
 	return res, nil
 }
 
+// GarbageCollector runs the Badger garbage collector every five minutes.
 func (b *BadgerBackend) GarbageCollector() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()

@@ -67,3 +67,12 @@ func Test_notAllowed(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, resp.StatusCode, http.StatusNotFound)
 }
+
+func Test_EnableHTTPS(t *testing.T) {
+	st := &testStore{}
+	s := norppahttp.New("127.0.0.1:0", st)
+	require.NotNil(t, s)
+
+	err := s.EnableHTTPS("DOESFISJEFOSEF", "does not exist :D", "helloworld")
+	require.NoError(t, err)
+}

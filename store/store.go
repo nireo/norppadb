@@ -1,8 +1,8 @@
+package store
+
 // store package contains all the logic for distributing the database service
 // for example the raft implementation. The HTTP endpoints for raft are in a
 // different file.
-
-package store
 
 import (
 	"bytes"
@@ -471,9 +471,11 @@ func checkRaftConfig(conf raft.Configuration) error {
 		if srv.ID == "" {
 			return fmt.Errorf("empty ID in configuration: %v", conf)
 		}
+
 		if srv.Address == "" {
 			return fmt.Errorf("empty address in configuration: %v", srv)
 		}
+
 		if ids[srv.ID] {
 			return fmt.Errorf("found duplicate ID in configuration: %v", srv.ID)
 		}
