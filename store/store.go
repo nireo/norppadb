@@ -145,6 +145,11 @@ func New(dir string, conf *Config, logging bool) (*Store, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to read recovery files: %s", err.Error())
 		}
+
+		if err = RecoverNode(st.datadir, stableStore, stableStore, snapshotStore, transport, c); err != nil {
+			return nil, fmt.Errorf("failed to recover node: %s", err.Error())
+		}
+		st.logger.Printf("node recovered successfully")
 	}
 
 	st.raft, err = raft.NewRaft(config, st, stableStore, stableStore, snapshotStore, transport)
@@ -604,7 +609,7 @@ func RecoverNode(dir string, logs raft.LogStore, stable raft.StableStore,
 	}
 
 	var d *db.BadgerBackend
-	if dbBytes == nil || len(dbBytes) == 0 {
+	if len(dbBytes) == 0 {
 		d, err = db.NewBadgerBackendMemory()
 	} else {
 		d, err = db.NewBadgerBackendMemory()
@@ -631,8 +636,8 @@ func RecoverNode(dir string, logs raft.LogStore, stable raft.StableStore,
 
 	for idx := snapshotIdx + 1; idx <= lastLogIdx; idx++ {
 		var entry raft.Log
-		if err = logs.GetLog(idx, &entry); err != nil {
-			return fmt.Errorf("failed to get log at idx %d: v", idx, err)
+		if err := logs.GetLog(idx, &entry); err != nil {
+			return fmt.Errorf("failed to get log at idx %d: %v", idx, err)
 		}
 
 		if entry.Type == raft.LogCommand {
