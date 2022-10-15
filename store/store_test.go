@@ -47,7 +47,7 @@ func newStore(t *testing.T, port, id int, bootstrap bool) (*store.Store, error) 
 	config.SnapshotThreshold = 10000
 	config.Bootstrap = bootstrap
 
-	return store.New(datadir, config)
+	return store.New(datadir, config, false)
 }
 
 func waitForLeaderID(s *store.Store, timeout time.Duration) (string, error) {
@@ -80,9 +80,9 @@ func getNPorts(n int) []int {
 	return ports
 }
 
-func TestMultipleNodes(t *testing.T) {
+func createNStores(t *testing.T, nodeCount int) []*store.Store {
+	t.Helper()
 	var stores []*store.Store
-	nodeCount := 3
 	ports := getNPorts(nodeCount)
 
 	for i := 0; i < nodeCount; i++ {
@@ -104,6 +104,13 @@ func TestMultipleNodes(t *testing.T) {
 		}
 		stores = append(stores, store)
 	}
+
+	return stores
+}
+
+func TestMultipleNodes(t *testing.T) {
+	nodeCount := 3
+	stores := createNStores(t, nodeCount)
 
 	type pr struct {
 		Key   []byte
@@ -177,29 +184,8 @@ func TestSingleNode(t *testing.T) {
 }
 
 func TestGetServers(t *testing.T) {
-	var stores []*store.Store
 	nodeCount := 3
-	ports := getNPorts(nodeCount)
-
-	for i := 0; i < nodeCount; i++ {
-		store, err := newStore(t, ports[i], i, i == 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if i != 0 {
-			err = stores[0].Join(fmt.Sprintf("%d", i), fmt.Sprintf("localhost:%d", ports[i]))
-			if err != nil {
-				t.Fatal(err)
-			}
-		} else {
-			_, err = store.WaitForLeader(3 * time.Second)
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-		stores = append(stores, store)
-	}
+	stores := createNStores(t, nodeCount)
 
 	srvs, err := stores[0].GetServers()
 	require.NoError(t, err)
@@ -208,29 +194,8 @@ func TestGetServers(t *testing.T) {
 }
 
 func TestCheckConf(t *testing.T) {
-	var stores []*store.Store
 	nodeCount := 3
-	ports := getNPorts(nodeCount)
-
-	for i := 0; i < nodeCount; i++ {
-		store, err := newStore(t, ports[i], i, i == 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if i != 0 {
-			err = stores[0].Join(fmt.Sprintf("%d", i), fmt.Sprintf("localhost:%d", ports[i]))
-			if err != nil {
-				t.Fatal(err)
-			}
-		} else {
-			_, err = store.WaitForLeader(3 * time.Second)
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-		stores = append(stores, store)
-	}
+	stores := createNStores(t, nodeCount)
 
 	conf, err := stores[0].GetConfig()
 	require.NoError(t, err)

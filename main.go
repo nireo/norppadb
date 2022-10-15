@@ -48,7 +48,7 @@ func main() {
 		config.Bootstrap = true
 	}
 
-	st, err := store.New(datadir, config)
+	st, err := store.New(datadir, config, false)
 	if err != nil {
 		log.Fatal(err)
 	}

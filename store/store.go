@@ -73,7 +73,7 @@ type applyRes struct {
 }
 
 // dir is the datadir which contains raft data and database data
-func New(dir string, conf *Config) (*Store, error) {
+func New(dir string, conf *Config, logging bool) (*Store, error) {
 	st := &Store{conf: conf}
 	if err := st.setupdb(dir); err != nil {
 		return nil, err
@@ -127,6 +127,11 @@ func New(dir string, conf *Config) (*Store, error) {
 
 	if conf.CommitTimeout != 0 {
 		config.CommitTimeout = conf.CommitTimeout
+	}
+
+	if !logging {
+		// if logging is true raft defaults it to os.Stderr
+		config.LogOutput = io.Discard
 	}
 
 	st.raft, err = raft.NewRaft(config, st, stableStore, stableStore, snapshotStore, transport)
@@ -271,10 +276,12 @@ func (f *snapshot) Persist(sink raft.SnapshotSink) error {
 func (s *snapshot) Release() {
 }
 
+// LeaderAddr returns the leader node address.
 func (s *Store) LeaderAddr() string {
 	return string(s.raft.Leader())
 }
 
+// WaitForLeader waits until a leader is elected.
 func (s *Store) WaitForLeader(timeout time.Duration) (string, error) {
 	ticker := time.NewTicker(leaderWaitDelay)
 	defer ticker.Stop()
@@ -295,6 +302,7 @@ func (s *Store) WaitForLeader(timeout time.Duration) (string, error) {
 	}
 }
 
+// IsLeader returns a value indicating if a given store is the leader.
 func (s *Store) IsLeader() bool {
 	return s.raft.State() == raft.Leader
 }
@@ -307,6 +315,7 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// Leave removes a node with ID from the raft cluster.
 func (s *Store) Leave(id string) error {
 	s.logger.Printf("received request to remove node %s", id)
 	if !s.IsLeader() {
@@ -411,6 +420,10 @@ func (s *Store) Join(id, addr string) error {
 	return nil
 }
 
+// Get finds a given key from the raft cluster. If StrongConsistency is enabled,
+// the get request will be redirected to the leader node. Otherwise the value is
+// read from the given node. Getting from a non-leader node means that the value
+// might be old.
 func (s *Store) Get(key []byte) ([]byte, error) {
 	// query from the leader
 	if s.conf.StrongConsistency {
@@ -429,6 +442,7 @@ func (s *Store) Get(key []byte) ([]byte, error) {
 	return s.db.Get(key)
 }
 
+// GetServers returns all of the servers that belong to the raft cluster.
 func (s *Store) GetServers() ([]*Server, error) {
 	future := s.raft.GetConfiguration()
 	if err := future.Error(); err != nil {
@@ -445,6 +459,7 @@ func (s *Store) GetServers() ([]*Server, error) {
 	return servers, nil
 }
 
+// LeaderID returns the node ID of the leader node.
 func (s *Store) LeaderID() (string, error) {
 	addr := s.LeaderAddr()
 
@@ -462,6 +477,8 @@ func (s *Store) LeaderID() (string, error) {
 	return "", nil
 }
 
+// CheckRaftConfig checks that a given raft config is valid. This
+// is used for recovering a raft cluster.
 func CheckRaftConfig(conf raft.Configuration) error {
 	ids := make(map[raft.ServerID]bool)
 	addrs := make(map[raft.ServerAddress]bool)
@@ -498,6 +515,7 @@ func CheckRaftConfig(conf raft.Configuration) error {
 	return nil
 }
 
+// GetConfig handles the GetConfiguration future and returns the raft config.
 func (s *Store) GetConfig() (raft.Configuration, error) {
 	conf := s.raft.GetConfiguration()
 	if err := conf.Error(); err != nil {

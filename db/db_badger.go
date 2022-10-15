@@ -23,7 +23,10 @@ type KVPair struct {
 }
 
 func NewBadgerBackend(path string) (*BadgerBackend, error) {
-	db, err := badger.Open(badger.DefaultOptions(path))
+	opts := badger.DefaultOptions(path)
+	opts.Logger = nil
+
+	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, err
 	}
