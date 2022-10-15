@@ -28,6 +28,7 @@ const (
 	leaderWaitDelay  = 100 * time.Millisecond
 	appliedWaitDelay = 100 * time.Millisecond
 	maxPool          = 5
+	recoveryFile     = "recovery.json"
 )
 
 var (
@@ -59,12 +60,13 @@ type RaftStore interface {
 }
 
 type Store struct {
-	conf    *Config
-	raft    *raft.Raft
-	db      *db.BadgerBackend
-	raftdir string
-	datadir string
-	logger  *log.Logger
+	conf         *Config
+	raft         *raft.Raft
+	db           *db.BadgerBackend
+	raftdir      string
+	datadir      string
+	logger       *log.Logger
+	recoveryPath string
 }
 
 type applyRes struct {
@@ -85,6 +87,7 @@ func New(dir string, conf *Config, logging bool) (*Store, error) {
 		return nil, err
 	}
 	st.raftdir = raftDir
+	st.recoveryPath = filepath.Join(dir, recoveryFile)
 
 	st.logger.Printf("binding raft on addr: %s", conf.BindAddr)
 
@@ -134,6 +137,16 @@ func New(dir string, conf *Config, logging bool) (*Store, error) {
 		config.LogOutput = io.Discard
 	}
 
+	if fileExists(st.recoveryPath) {
+		st.logger.Printf("starting to recover from file: %s", st.recoveryPath)
+
+		// handel recovery
+		c, err := raft.ReadConfigJSON(st.recoveryPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read recovery files: %s", err.Error())
+		}
+	}
+
 	st.raft, err = raft.NewRaft(config, st, stableStore, stableStore, snapshotStore, transport)
 	if err != nil {
 		return nil, err
@@ -168,9 +181,14 @@ func (s *Store) setupdb(dir string) error {
 }
 
 func (s *Store) Apply(l *raft.Log) interface{} {
+	return applyHelper(l.Data, &s.db)
+}
+
+func applyHelper(data []byte, dbb **db.BadgerBackend) interface{} {
+	db := *dbb
 	var ac Action
 
-	if err := proto.Unmarshal(l.Data, &ac); err != nil {
+	if err := proto.Unmarshal(data, &ac); err != nil {
 		return err
 	}
 
@@ -179,13 +197,13 @@ func (s *Store) Apply(l *raft.Log) interface{} {
 		if ac.Key == nil {
 			return ErrValuesAreNil
 		}
-		res, err := s.db.Get(ac.Key)
+		res, err := db.Get(ac.Key)
 		return &applyRes{res: res, err: err}
 	case Action_NEW:
 		if ac.Key == nil || ac.Value == nil {
 			return ErrValuesAreNil
 		}
-		return &applyRes{res: nil, err: s.db.Put(ac.Key, ac.Value)}
+		return &applyRes{res: nil, err: db.Put(ac.Key, ac.Value)}
 	}
 
 	return nil
@@ -219,22 +237,30 @@ func (f *Store) Snapshot() (raft.FSMSnapshot, error) {
 	}, nil
 }
 
-func (f *Store) Restore(rc io.ReadCloser) error {
+func dbFromSnapshot(rc io.ReadCloser) ([]byte, error) {
 	buf := new(bytes.Buffer)
 	gz, err := gzip.NewReader(rc)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if _, err := io.Copy(buf, gz); err != nil {
-		return err
+		return nil, err
 	}
 
 	if err := gz.Close(); err != nil {
-		return err
+		return nil, err
 	}
 
-	return f.db.Load(bytes.NewReader(buf.Bytes()))
+	return buf.Bytes(), nil
+}
+
+func (f *Store) Restore(rc io.ReadCloser) error {
+	b, err := dbFromSnapshot(rc)
+	if err != nil {
+		return err
+	}
+	return f.db.Load(bytes.NewReader(b))
 }
 
 func (f *snapshot) Persist(sink raft.SnapshotSink) error {
@@ -523,4 +549,124 @@ func (s *Store) GetConfig() (raft.Configuration, error) {
 	}
 
 	return conf.Configuration(), nil
+}
+
+func fileExists(path string) bool {
+	if _, err := os.Lstat(path); err != nil && os.IsNotExist(err) {
+		return false
+	}
+	return true
+}
+
+// Recover node from a json configuration file.
+func RecoverNode(dir string, logs raft.LogStore, stable raft.StableStore,
+	snaps raft.SnapshotStore, tn raft.Transport, conf raft.Configuration) error {
+	// ensure that the configuration makes sense
+	if err := CheckRaftConfig(conf); err != nil {
+		return err
+	}
+
+	var (
+		snapshotIdx  uint64
+		snapshotTerm uint64
+	)
+
+	snapshots, err := snaps.List()
+	if err != nil {
+		return fmt.Errorf("failed to list snapshots: %v", err)
+	}
+
+	// find the most recent database bytes.
+	var dbBytes []byte
+	for _, snapshot := range snapshots {
+		// we continue in the hope of finding at least one snapshot
+		// and thus shouldn't stop when having errors opening one snapshot
+
+		var src io.ReadCloser
+		_, src, err = snaps.Open(snapshot.ID)
+		if err != nil {
+			continue
+		}
+
+		dbBytes, err = dbFromSnapshot(src)
+		src.Close()
+		if err != nil {
+			continue
+		}
+
+		snapshotIdx = snapshot.Index
+		snapshotTerm = snapshot.Term
+		break
+	}
+
+	if len(snapshots) > 0 && (snapshotIdx == 0 || snapshotTerm == 0) {
+		return fmt.Errorf("failed to restore any of the available snapshots")
+	}
+
+	var d *db.BadgerBackend
+	if dbBytes == nil || len(dbBytes) == 0 {
+		d, err = db.NewBadgerBackendMemory()
+	} else {
+		d, err = db.NewBadgerBackendMemory()
+		if err != nil {
+			return err
+		}
+
+		if err := d.Load(bytes.NewReader(dbBytes)); err != nil {
+			return err
+		}
+	}
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+
+	lastIdx := snapshotIdx
+	lastTerm := snapshotTerm
+
+	lastLogIdx, err := logs.LastIndex()
+	if err != nil {
+		return fmt.Errorf("failed to find last log: %v", err)
+	}
+
+	for idx := snapshotIdx + 1; idx <= lastLogIdx; idx++ {
+		var entry raft.Log
+		if err = logs.GetLog(idx, &entry); err != nil {
+			return fmt.Errorf("failed to get log at idx %d: v", idx, err)
+		}
+
+		if entry.Type == raft.LogCommand {
+			applyHelper(entry.Data, &d)
+		}
+
+		lastIdx = entry.Index
+		lastTerm = entry.Term
+	}
+
+	snp := &snapshot{
+		db:           d.DB,
+		start:        time.Now(),
+		lastSnapshot: d.LastSnapshot,
+	}
+	sink, err := snaps.Create(1, lastIdx, lastTerm, conf, 1, tn)
+	if err != nil {
+		return fmt.Errorf("failed to create snapshot: %v", err)
+	}
+	if err = snp.Persist(sink); err != nil {
+		return fmt.Errorf("failed to persist snapshot: %v", err)
+	}
+	if err = sink.Close(); err != nil {
+		return fmt.Errorf("failed to finalize snapshot: %v", err)
+	}
+
+	firstLogIndex, err := logs.FirstIndex()
+	if err != nil {
+		return fmt.Errorf("failed to get first log index: %v", err)
+	}
+
+	if err := logs.DeleteRange(firstLogIndex, lastLogIdx); err != nil {
+		return fmt.Errorf("log compaction failed: %v", err)
+	}
+
+	return nil
 }
