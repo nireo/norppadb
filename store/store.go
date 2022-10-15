@@ -462,7 +462,7 @@ func (s *Store) LeaderID() (string, error) {
 	return "", nil
 }
 
-func checkRaftConfig(conf raft.Configuration) error {
+func CheckRaftConfig(conf raft.Configuration) error {
 	ids := make(map[raft.ServerID]bool)
 	addrs := make(map[raft.ServerAddress]bool)
 	var voters int
@@ -496,4 +496,13 @@ func checkRaftConfig(conf raft.Configuration) error {
 	}
 
 	return nil
+}
+
+func (s *Store) GetConfig() (raft.Configuration, error) {
+	conf := s.raft.GetConfiguration()
+	if err := conf.Error(); err != nil {
+		return raft.Configuration{}, err
+	}
+
+	return conf.Configuration(), nil
 }

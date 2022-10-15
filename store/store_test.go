@@ -72,14 +72,18 @@ func waitForLeaderID(s *store.Store, timeout time.Duration) (string, error) {
 	}
 }
 
+func getNPorts(n int) []int {
+	ports := make([]int, n)
+	for i := 0; i < n; i++ {
+		ports[i], _ = getFreePort()
+	}
+	return ports
+}
+
 func TestMultipleNodes(t *testing.T) {
 	var stores []*store.Store
 	nodeCount := 3
-	ports := make([]int, nodeCount)
-
-	for i := 0; i < nodeCount; i++ {
-		ports[i], _ = getFreePort()
-	}
+	ports := getNPorts(nodeCount)
 
 	for i := 0; i < nodeCount; i++ {
 		store, err := newStore(t, ports[i], i, i == 0)
@@ -170,4 +174,67 @@ func TestSingleNode(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, val, []byte("world"))
+}
+
+func TestGetServers(t *testing.T) {
+	var stores []*store.Store
+	nodeCount := 3
+	ports := getNPorts(nodeCount)
+
+	for i := 0; i < nodeCount; i++ {
+		store, err := newStore(t, ports[i], i, i == 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if i != 0 {
+			err = stores[0].Join(fmt.Sprintf("%d", i), fmt.Sprintf("localhost:%d", ports[i]))
+			if err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			_, err = store.WaitForLeader(3 * time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		stores = append(stores, store)
+	}
+
+	srvs, err := stores[0].GetServers()
+	require.NoError(t, err)
+
+	require.Equal(t, 3, len(srvs))
+}
+
+func TestCheckConf(t *testing.T) {
+	var stores []*store.Store
+	nodeCount := 3
+	ports := getNPorts(nodeCount)
+
+	for i := 0; i < nodeCount; i++ {
+		store, err := newStore(t, ports[i], i, i == 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if i != 0 {
+			err = stores[0].Join(fmt.Sprintf("%d", i), fmt.Sprintf("localhost:%d", ports[i]))
+			if err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			_, err = store.WaitForLeader(3 * time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		stores = append(stores, store)
+	}
+
+	conf, err := stores[0].GetConfig()
+	require.NoError(t, err)
+
+	err = store.CheckRaftConfig(conf)
+	require.NoError(t, err)
 }
