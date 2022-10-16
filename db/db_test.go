@@ -3,7 +3,6 @@ package db_test
 import (
 	"bytes"
 	"errors"
-	"log"
 	"math/rand"
 	"os"
 	"sync"

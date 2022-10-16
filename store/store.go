@@ -20,6 +20,7 @@ import (
 	"github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb"
 	"github.com/nireo/norppadb/db"
+	"github.com/nireo/norppadb/messages"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -55,7 +56,7 @@ type RaftStore interface {
 	Put(key []byte, val []byte) error
 	Leave(id string) error
 	Join(id, addr string) error
-	GetServers() ([]*Server, error)
+	GetServers() ([]*messages.Server, error)
 	LeaderAddr() string
 }
 
@@ -195,20 +196,20 @@ func (s *Store) Apply(l *raft.Log) interface{} {
 
 func applyHelper(data []byte, dbb **db.BadgerBackend) interface{} {
 	db := *dbb
-	var ac Action
+	var ac messages.Action
 
 	if err := proto.Unmarshal(data, &ac); err != nil {
 		return err
 	}
 
 	switch ac.Type {
-	case Action_GET:
+	case messages.Action_GET:
 		if ac.Key == nil {
 			return ErrValuesAreNil
 		}
 		res, err := db.Get(ac.Key)
 		return &applyRes{res: res, err: err}
-	case Action_NEW:
+	case messages.Action_NEW:
 		if ac.Key == nil || ac.Value == nil {
 			return ErrValuesAreNil
 		}
@@ -223,7 +224,7 @@ func (s *Store) Put(key, value []byte) error {
 		return ErrNotLeader
 	}
 
-	res, err := s.apply(Action_NEW, key, value)
+	res, err := s.apply(messages.Action_NEW, key, value)
 	if err != nil {
 		return err
 	}
@@ -366,8 +367,8 @@ func (s *Store) Leave(id string) error {
 	return nil
 }
 
-func (s *Store) apply(ty Action_ACTION_TYPE, key, value []byte) (any, error) {
-	action := &Action{
+func (s *Store) apply(ty messages.Action_ACTION_TYPE, key, value []byte) (any, error) {
+	action := &messages.Action{
 		Type:  ty,
 		Key:   key,
 		Value: value,
@@ -466,7 +467,7 @@ func (s *Store) Get(key []byte) ([]byte, error) {
 			return nil, ErrNotLeader
 		}
 
-		res, err := s.apply(Action_GET, key, nil)
+		res, err := s.apply(messages.Action_GET, key, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -478,14 +479,14 @@ func (s *Store) Get(key []byte) ([]byte, error) {
 }
 
 // GetServers returns all of the servers that belong to the raft cluster.
-func (s *Store) GetServers() ([]*Server, error) {
+func (s *Store) GetServers() ([]*messages.Server, error) {
 	future := s.raft.GetConfiguration()
 	if err := future.Error(); err != nil {
 		return nil, err
 	}
-	var servers []*Server
+	var servers []*messages.Server
 	for _, server := range future.Configuration().Servers {
-		servers = append(servers, &Server{
+		servers = append(servers, &messages.Server{
 			Id:       string(server.ID),
 			RpcAddr:  string(server.Address),
 			IsLeader: s.raft.Leader() == server.Address,
