@@ -156,7 +156,7 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 	if len(key) > db.MaxKeySize {
 		w.WriteHeader(http.StatusBadRequest)
 		return
-
+	}
 
 	val, err := s.store.Get(key)
 	if err != nil {
@@ -325,7 +325,6 @@ func (s *Server) Addr() net.Addr {
 	return s.ln.Addr()
 }
 
-	
 func (s *Server) Close() {
 	close(s.closeChan)
 	s.ln.Close()

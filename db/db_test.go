@@ -3,12 +3,14 @@ package db_test
 import (
 	"bytes"
 	"errors"
+	"log"
 	"math/rand"
 	"os"
 	"sync"
 	"testing"
 
 	"github.com/nireo/norppadb/db"
+	"github.com/stretchr/testify/require"
 )
 
 func createTestDB(t *testing.T) (*db.DB, string) {
@@ -23,10 +25,25 @@ func createTestDB(t *testing.T) (*db.DB, string) {
 	}
 
 	t.Cleanup(func() {
-		os.RemoveAll(file)
 		db.Close()
+		os.RemoveAll(file)
 	})
 
+	return db, file
+}
+
+func createTestBadgerDB(t *testing.T) (*db.BadgerBackend, string) {
+	file, err := os.MkdirTemp("", "norppadb")
+	require.NoError(t, err)
+
+	db, err := db.NewBadgerBackend(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		db.Close()
+		os.RemoveAll(file)
+	})
 	return db, file
 }
 
@@ -48,6 +65,27 @@ func genRandomPairs(amount, stringSize int) []testpair {
 		pairs[i].key = b
 		pairs[i].value = b
 	}
+	return pairs
+}
+
+func genRandomPairs2(amount, stringSize int) []*db.KVPair {
+	alphabet := []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	alen := len(alphabet)
+	pairs := make([]*db.KVPair, 0)
+	for i := 0; i < amount; i++ {
+		b := make([]byte, stringSize)
+		for j := 0; j < stringSize; j++ {
+			b[j] = alphabet[rand.Intn(alen)]
+		}
+
+		pr := &db.KVPair{
+			Key:   b,
+			Value: b,
+		}
+
+		pairs = append(pairs, pr)
+	}
+
 	return pairs
 }
 
@@ -165,5 +203,21 @@ func Test_readid(t *testing.T) {
 		if db.ReadID(tc.fname) != tc.expected {
 			t.Fatalf("test %d failed: got %d", idx, db.ReadID(tc.fname))
 		}
+	}
+}
+
+func TestBatchWrite(t *testing.T) {
+	pairs := genRandomPairs2(16, 10)
+
+	// write pairs in patch
+	db, _ := createTestBadgerDB(t)
+
+	err := db.BatchWrite(pairs)
+	require.NoError(t, err)
+
+	// if we cannot find one value that means the BatchWrite has failed
+	for _, pr := range pairs {
+		_, err = db.Get(pr.Key)
+		require.NoError(t, err)
 	}
 }

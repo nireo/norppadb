@@ -203,3 +203,19 @@ func TestCheckConf(t *testing.T) {
 	err = store.CheckRaftConfig(conf)
 	require.NoError(t, err)
 }
+
+func TestIsLeader(t *testing.T) {
+	stores := createNStores(t, 1)
+
+	_, err := stores[0].WaitForLeader(10 * time.Second)
+	require.NoError(t, err)
+
+	require.True(t, stores[0].IsLeader())
+}
+
+func TestCannotJoinSelf(t *testing.T) {
+	stores := createNStores(t, 1)
+
+	_, err := stores[0].WaitForLeader(10 * time.Second)
+	require.NoError(t, err)
+}

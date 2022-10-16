@@ -182,7 +182,11 @@ func (s *Store) setupdb(dir string) error {
 	s.datadir = dbPath
 	var err error
 	s.db, err = db.NewBadgerBackend(dbPath)
-	return err
+	if err != nil {
+		return err
+	}
+	go s.db.GarbageCollector()
+	return nil
 }
 
 func (s *Store) Apply(l *raft.Log) interface{} {
@@ -653,13 +657,16 @@ func RecoverNode(dir string, logs raft.LogStore, stable raft.StableStore,
 		start:        time.Now(),
 		lastSnapshot: d.LastSnapshot,
 	}
+
 	sink, err := snaps.Create(1, lastIdx, lastTerm, conf, 1, tn)
 	if err != nil {
 		return fmt.Errorf("failed to create snapshot: %v", err)
 	}
+
 	if err = snp.Persist(sink); err != nil {
 		return fmt.Errorf("failed to persist snapshot: %v", err)
 	}
+
 	if err = sink.Close(); err != nil {
 		return fmt.Errorf("failed to finalize snapshot: %v", err)
 	}
