@@ -214,6 +214,12 @@ func applyHelper(data []byte, dbb **db.BadgerBackend) interface{} {
 			return ErrValuesAreNil
 		}
 		return &applyRes{res: nil, err: db.Put(ac.Key, ac.Value)}
+	case messages.Action_DELETE:
+		if ac.Key == nil {
+			return ErrValuesAreNil
+		}
+
+		return &applyRes{res: nil, err: db.Delete(ac.Key)}
 	}
 
 	return nil
@@ -476,6 +482,19 @@ func (s *Store) Get(key []byte) ([]byte, error) {
 		return r.res, r.err
 	}
 	return s.db.Get(key)
+}
+
+func (s *Store) Delete(key []byte) error {
+	if !s.IsLeader() {
+		return ErrNotLeader
+	}
+
+	res, err := s.apply(messages.Action_DELETE, key, nil)
+	if err != nil {
+		return err
+	}
+	r := res.(*applyRes)
+	return r.err
 }
 
 // GetServers returns all of the servers that belong to the raft cluster.

@@ -9,7 +9,7 @@ message Action {
   enum ACTION_TYPE {
     GET = 0;
     NEW = 1;
-    DELETE = 2;
+    DELETE = 3;
   }
   ACTION_TYPE type = 3;
 }

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v3"
+	"github.com/nireo/norppadb/messages"
 )
 
 // BadgerBackend also want to support in memory databases for quick access to improve
@@ -15,11 +16,6 @@ type BadgerBackend struct {
 	DB           *badger.DB
 	LastSnapshot time.Time
 	IsMem        bool
-}
-
-type KVPair struct {
-	Key   []byte
-	Value []byte
 }
 
 // NewBadgerBackend creates/opens a badger database on disk. Slower than opening one
@@ -117,7 +113,7 @@ func (b *BadgerBackend) Load(r io.Reader) error {
 // BatchWrite writes a list of pairs into the collection. It is faster to write many
 // entries using this since this doesn't create a separate write transaction for each
 // pair.
-func (b *BadgerBackend) BatchWrite(pairs []*KVPair) error {
+func (b *BadgerBackend) BatchWrite(pairs []*messages.KVPair) error {
 	batch := b.DB.NewWriteBatch()
 	defer batch.Cancel()
 
@@ -133,10 +129,10 @@ func (b *BadgerBackend) BatchWrite(pairs []*KVPair) error {
 
 // BatchGet tries to find all of the keys listed in the keys parameter. If a key is not
 // found, it will be ignored and the function will continue on to the next one.
-func (b *BadgerBackend) BatchGet(keys [][]byte) ([]*KVPair, error) {
+func (b *BadgerBackend) BatchGet(keys [][]byte) ([]*messages.KVPair, error) {
 	// cannot really preallocate these since we wont know how many of them will
 	// exist
-	res := make([]*KVPair, 0)
+	res := make([]*messages.KVPair, 0)
 
 	for i := range keys {
 		val, err := b.Get(keys[i])
@@ -144,7 +140,7 @@ func (b *BadgerBackend) BatchGet(keys [][]byte) ([]*KVPair, error) {
 			continue
 		}
 
-		res = append(res, &KVPair{
+		res = append(res, &messages.KVPair{
 			Key:   keys[i],
 			Value: val,
 		})
@@ -154,8 +150,8 @@ func (b *BadgerBackend) BatchGet(keys [][]byte) ([]*KVPair, error) {
 
 // PrefixScan finds all the keys in the database that starts with the given
 // prefix.
-func (b *BadgerBackend) PrefixScan(prefix []byte) ([]*KVPair, error) {
-	res := make([]*KVPair, 0)
+func (b *BadgerBackend) PrefixScan(prefix []byte) ([]*messages.KVPair, error) {
+	res := make([]*messages.KVPair, 0)
 
 	err := b.DB.View(func(txn *badger.Txn) error {
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
@@ -168,7 +164,7 @@ func (b *BadgerBackend) PrefixScan(prefix []byte) ([]*KVPair, error) {
 				return err
 			}
 
-			res = append(res, &KVPair{
+			res = append(res, &messages.KVPair{
 				Key:   item.KeyCopy(nil),
 				Value: v,
 			})

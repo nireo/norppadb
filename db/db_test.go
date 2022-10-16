@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/nireo/norppadb/db"
+	"github.com/nireo/norppadb/messages"
 	"github.com/stretchr/testify/require"
 )
 
@@ -67,17 +68,17 @@ func genRandomPairs(amount, stringSize int) []testpair {
 	return pairs
 }
 
-func genRandomPairs2(amount, stringSize int) []*db.KVPair {
+func genRandomPairs2(amount, stringSize int) []*messages.KVPair {
 	alphabet := []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 	alen := len(alphabet)
-	pairs := make([]*db.KVPair, 0)
+	pairs := make([]*messages.KVPair, 0)
 	for i := 0; i < amount; i++ {
 		b := make([]byte, stringSize)
 		for j := 0; j < stringSize; j++ {
 			b[j] = alphabet[rand.Intn(alen)]
 		}
 
-		pr := &db.KVPair{
+		pr := &messages.KVPair{
 			Key:   b,
 			Value: b,
 		}
