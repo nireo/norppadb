@@ -14,8 +14,14 @@ import (
 	"strings"
 
 	"github.com/nireo/norppadb/db"
+	"github.com/nireo/norppadb/security"
 	"github.com/nireo/norppadb/store"
 )
+
+type serverAuth struct {
+	enabled bool
+	store   *security.AuthStore
+}
 
 type Server struct {
 	store     store.RaftStore
@@ -23,6 +29,7 @@ type Server struct {
 	addr      string
 	closeChan chan struct{}
 	lgr       *log.Logger
+	auth      *serverAuth
 	debug     bool // whether to enable debugging routes such as '/debug/pprof'
 
 	// these are public so we can easily configure them without having more
@@ -39,7 +46,32 @@ func New(addr string, store store.RaftStore) *Server {
 		addr:      addr,
 		closeChan: make(chan struct{}),
 		lgr:       log.New(os.Stderr, "[http]", log.LstdFlags),
+		auth: &serverAuth{
+			enabled: false,
+			store:   security.NewAuthStore(),
+		},
 	}
+}
+
+// EnableAuth parses a file with definitions for each user and their permissions.
+// Authentication is optional.
+func (s *Server) EnableAuth(authFile string) error {
+	f, err := os.Open(authFile)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	if err := s.auth.store.Initialize(f); err != nil {
+		return err
+	}
+	s.auth.enabled = true
+
+	return nil
+}
+
+func (s *Server) AuthSetAllUserPermissions(perms ...string) {
+	s.auth.store.SetForAllUser(perms...)
 }
 
 // EnableHTTPS takes in filepaths to certain files needed to establish a TLS server
@@ -152,6 +184,13 @@ func makeconf(cert, key, cacert string) (*tls.Config, error) {
 }
 
 func (s *Server) get(w http.ResponseWriter, r *http.Request) {
+	if s.auth.enabled {
+		if !s.auth.store.HasPermissionReq(r, "get") && !s.auth.store.HasPermisson(security.AllUser, "get") {
+			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+			return
+		}
+	}
+
 	key := []byte(r.URL.Path)
 	if len(key) > db.MaxKeySize {
 		w.WriteHeader(http.StatusBadRequest)
@@ -179,6 +218,13 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) put(w http.ResponseWriter, r *http.Request) {
+	if s.auth.enabled {
+		if !s.auth.store.HasPermissionReq(r, "get") && !s.auth.store.HasPermisson(security.AllUser, "put") {
+			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+			return
+		}
+	}
+
 	// set key, use put method since the key maybe already exists so it's more
 	// intuitive.
 	// key is the url after address and request body is the value

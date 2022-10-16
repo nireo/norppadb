@@ -8,6 +8,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+const AllUser = "*"
+
 // Creds is used to parse credential entries from JSON.
 type Creds struct {
 	Username    string   `json:"username,omitempty"`
@@ -58,6 +60,13 @@ func (as *AuthStore) Initialize(r io.Reader) error {
 	}
 
 	return nil
+}
+
+func (as *AuthStore) SetForAllUser(perms ...string) {
+	as.passwords[AllUser] = nil
+	for _, perm := range perms {
+		as.permissions[AllUser][perm] = struct{}{}
+	}
 }
 
 // ValidatePassword checks the passwords lists and compares the bcrypt hash of
