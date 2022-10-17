@@ -10,6 +10,10 @@ check:
 	go vet ./...
 	staticcheck ./...
 
+.PHONY:
+server:
+	go build -o server cmd/server/*.go
+
 .PHONY: test
 test:
 	go test -v ./...

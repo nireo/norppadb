@@ -33,12 +33,23 @@ const (
 )
 
 var (
+	// ErrTimeoutExpired is for when waiting for a leader node to be elected
+	// we run out of the given timeout.
 	ErrTimeoutExpired = errors.New("timeout expired")
-	ErrNotLeader      = errors.New("not leader")
-	ErrJoinSelf       = errors.New("trying to join self")
-	ErrValuesAreNil   = errors.New("values are nil")
+
+	// ErrNotLeader is for when a voter/non-voter node tries to execute an action
+	// that is leader-only.
+	ErrNotLeader = errors.New("not leader")
+
+	// ErrJoinSelf is for  when a node tries to join itself.
+	ErrJoinSelf = errors.New("trying to join self")
+
+	// ErrValuesAreNil is for when either a key or value that are given to
+	// raft.Apply are nil, even though they should contain []byte data.
+	ErrValuesAreNil = errors.New("values are nil")
 )
 
+// Config contains the user-configurable values for the store.
 type Config struct {
 	Bootstrap          bool
 	SnapshotThreshold  uint64
@@ -51,6 +62,7 @@ type Config struct {
 	LeaderLeaseTimeout time.Duration
 }
 
+// RaftStore shows what methods a given Raft cluster should implement.
 type RaftStore interface {
 	Get(key []byte) (val []byte, err error)
 	Put(key []byte, val []byte) error
@@ -70,12 +82,15 @@ type Store struct {
 	recoveryPath string
 }
 
+// applyRes represents a the data returned by raft.Apply()
 type applyRes struct {
 	err error
 	res []byte
 }
 
-// dir is the datadir which contains raft data and database data
+// New creates a new instance of an store. It sets up the data directory, raft directory
+// raft databases, internal database and raft connections. It also checks for possible
+// recovery files to recover a failed cluster.
 func New(dir string, conf *Config, logging bool) (*Store, error) {
 	st := &Store{conf: conf}
 	if err := st.setupdb(dir); err != nil {
@@ -175,6 +190,7 @@ func New(dir string, conf *Config, logging bool) (*Store, error) {
 	return st, err
 }
 
+// setupdb sets up the database on disk.
 func (s *Store) setupdb(dir string) error {
 	dbPath := filepath.Join(dir, "db")
 	if err := os.MkdirAll(dbPath, os.ModePerm); err != nil {
@@ -194,6 +210,9 @@ func (s *Store) Apply(l *raft.Log) interface{} {
 	return applyHelper(l.Data, &s.db)
 }
 
+// applyHelper is different from 'apply' since this is used by the leader to actually
+// execute the action given to raft.Apply. 'apply' only sends action information to
+// raft.Apply.
 func applyHelper(data []byte, dbb **db.BadgerBackend) interface{} {
 	db := *dbb
 	var ac messages.Action
@@ -225,6 +244,7 @@ func applyHelper(data []byte, dbb **db.BadgerBackend) interface{} {
 	return nil
 }
 
+// Put writes a key-value pair into the cluster. This is a leader-only operation.
 func (s *Store) Put(key, value []byte) error {
 	if !s.IsLeader() {
 		return ErrNotLeader
@@ -245,6 +265,7 @@ type snapshot struct {
 	db           *badger.DB
 }
 
+// Snapshot creates a snapshot of the store.
 func (f *Store) Snapshot() (raft.FSMSnapshot, error) {
 	return &snapshot{
 		db:           f.db.DB,
@@ -253,6 +274,8 @@ func (f *Store) Snapshot() (raft.FSMSnapshot, error) {
 	}, nil
 }
 
+// dbFromSnapshot converts gzip compressed data from a given io.ReadCloser into
+// database entries and constructs and database state from that.
 func dbFromSnapshot(rc io.ReadCloser) ([]byte, error) {
 	buf := new(bytes.Buffer)
 	gz, err := gzip.NewReader(rc)
@@ -271,6 +294,8 @@ func dbFromSnapshot(rc io.ReadCloser) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// Restore takes in the data created by snapshot.Persist() and creates the internal
+// database based on that data.
 func (f *Store) Restore(rc io.ReadCloser) error {
 	b, err := dbFromSnapshot(rc)
 	if err != nil {
@@ -279,6 +304,10 @@ func (f *Store) Restore(rc io.ReadCloser) error {
 	return f.db.Load(bytes.NewReader(b))
 }
 
+// Persist writes the state of the database into a raft.SnapshotSink. It also compresses
+// the data, since it's more efficient to compress it here and then send it, compared to
+// sending all of the bytes at once. It also writes the entries into the database, that
+// have been written after the lastSnapshot timestamp.
 func (f *snapshot) Persist(sink raft.SnapshotSink) error {
 	err := func() error {
 		var buf1 bytes.Buffer
@@ -315,6 +344,7 @@ func (f *snapshot) Persist(sink raft.SnapshotSink) error {
 	return nil
 }
 
+// Release releases snapshot.
 func (s *snapshot) Release() {
 }
 
@@ -349,6 +379,7 @@ func (s *Store) IsLeader() bool {
 	return s.raft.State() == raft.Leader
 }
 
+// Close shuts the Raft cluster and the internal database connection.
 func (s *Store) Close() error {
 	f := s.raft.Shutdown()
 	if err := f.Error(); err != nil {
@@ -373,6 +404,9 @@ func (s *Store) Leave(id string) error {
 	return nil
 }
 
+// apply is a helper to apply a given action in the Raft cluster. It handles errors and
+// marshaling action data. It also calls the raft.Apply() function to apply action across
+// the whole cluster.
 func (s *Store) apply(ty messages.Action_ACTION_TYPE, key, value []byte) (any, error) {
 	action := &messages.Action{
 		Type:  ty,
@@ -400,6 +434,8 @@ func (s *Store) apply(ty messages.Action_ACTION_TYPE, key, value []byte) (any, e
 	return r, nil
 }
 
+// remove is a helpher for removing servers from the Raft cluster. Removing nodes from a
+// cluster is an leader-only action.
 func (s *Store) remove(id string) error {
 	if !s.IsLeader() {
 		return ErrNotLeader
@@ -484,6 +520,8 @@ func (s *Store) Get(key []byte) ([]byte, error) {
 	return s.db.Get(key)
 }
 
+// Delete deletes the key-value pair with the given key. It is an leader-only
+// operation.
 func (s *Store) Delete(key []byte) error {
 	if !s.IsLeader() {
 		return ErrNotLeader
@@ -580,6 +618,7 @@ func (s *Store) GetConfig() (raft.Configuration, error) {
 	return conf.Configuration(), nil
 }
 
+// fileExists checks if a file a 'path' exists.
 func fileExists(path string) bool {
 	if _, err := os.Lstat(path); err != nil && os.IsNotExist(err) {
 		return false
@@ -587,7 +626,8 @@ func fileExists(path string) bool {
 	return true
 }
 
-// Recover node from a json configuration file.
+// RecoverNode tries to recover a Raft cluster from a given recovery configuration
+// file.
 func RecoverNode(dir string, logs raft.LogStore, stable raft.StableStore,
 	snaps raft.SnapshotStore, tn raft.Transport, conf raft.Configuration) error {
 	// ensure that the configuration makes sense
