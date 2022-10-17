@@ -1,14 +1,24 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
+
+	"github.com/hashicorp/raft"
+	httpd "github.com/nireo/norppadb/http"
+	"github.com/nireo/norppadb/store"
 )
 
 type Config struct {
@@ -89,6 +99,7 @@ func ParseFlags() (*Config, error) {
 	flag.StringVar(&conf.AuthFile, "auth-file", "", "Path to file defining user authentication.")
 	flag.StringVar(&conf.JoinAddr, "join", "", "List of addresses to attempt to join.")
 	flag.StringVar(&conf.DiskPath, "disk-path", "", "Disk path for the database. If left empty, database will start in memory.")
+	flag.BoolVar(&conf.Boostrap, "bootstrap", false, "Bootstrap the cluster.")
 
 	flag.Parse()
 
@@ -120,4 +131,62 @@ func exitWithMessage(code int, errorMsg string) {
 }
 
 func main() {
+	conf, err := ParseFlags()
+	if err != nil {
+		exitWithMessage(1, fmt.Sprintf("failed reading flags or validating config: %s", err))
+	}
+
+	// create store
+	storeConfig := &store.Config{}
+	storeConfig.BindAddr = conf.RaftAddr
+	storeConfig.LocalID = raft.ServerID(conf.NodeID)
+	storeConfig.HeartbeatTimeout = 50 * time.Millisecond
+	storeConfig.ElectionTimeout = 50 * time.Millisecond
+	storeConfig.LeaderLeaseTimeout = 50 * time.Millisecond
+	storeConfig.CommitTimeout = 5 * time.Millisecond
+	storeConfig.SnapshotThreshold = 10000
+	storeConfig.Bootstrap = conf.Boostrap
+
+	st, err := store.New(conf.DataDir, storeConfig, false)
+	if err != nil {
+		exitWithMessage(1, fmt.Sprintf("failed starting store: %s", err))
+	}
+
+	if conf.JoinAddr != "" {
+		jsonmap := make(map[string]interface{})
+		jsonmap["id"] = conf.NodeID
+		jsonmap["addr"] = conf.RaftAddr
+
+		b, err := json.Marshal(jsonmap)
+		if err != nil {
+			exitWithMessage(1, "cannot marshal request body into json")
+		}
+
+		req, err := http.NewRequest("POST", conf.JoinAddr+"/join", bytes.NewBuffer(b))
+		if err != nil {
+			exitWithMessage(1, "cannot create HTTP post request.")
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			exitWithMessage(1, "cannot send join request")
+		}
+
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			exitWithMessage(1, fmt.Sprintf(
+				"failed sending join request, got code: %d", req.Response.StatusCode))
+		}
+	}
+
+	srv := httpd.New(conf.HTTPURL(), st)
+	if err := srv.Start(); err != nil {
+		log.Fatal("error starting server")
+	}
+
+	quitCh := make(chan os.Signal, 1)
+	signal.Notify(quitCh, os.Interrupt, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	<-quitCh
 }
