@@ -20,3 +20,37 @@ Distribution is handled by the Raft consensus algorithm and a simple HTTP server
 curl -X POST -d world http://localhost:9000/hello
 curl http://localhost:9000/hello
 ```
+
+
+## Authentication & Security
+
+NorppaDB supports a simple authentication store which holds permissions that every user has. The permissions are checked using [HTTP Basic scheme](https://datatracker.ietf.org/doc/html/rfc7617). NorppaDB also supports starting up a HTTPS server.
+
+
+## Server
+
+Using the server binary makes setting up a NorppaDB node a lot easier. Nodes are configured using command line flags. As seen in the "Usage" example not many options are needed to get things up and running. There still are some other options that add some extra functionality and security.
+
+```
+Usage of ./server
+  -auth-file string
+        Path to file defining user authentication.
+  -bootstrap
+        Bootstrap the cluster.
+  -disk-path string
+        Disk path for the database. If left empty, database will start in memory.
+  -http string
+        HTTP server address to bind to. (default "localhost:9000")
+  -http-ca-cert string
+        Path to root X.509 certificate
+  -http-cert string
+        Path to X.509 certificate
+  -http-key string
+        Path to X.509 key
+  -id string
+        Unique identifier for node.
+  -join string
+        List of addresses to attempt to join.
+  -raft string
+        The address to bind raft to. (default "localhost:50000")
+```
