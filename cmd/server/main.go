@@ -131,12 +131,14 @@ func exitWithMessage(code int, errorMsg string) {
 }
 
 func main() {
+	// Parse command line arguments. Easier to take them as command line flags
+	// for automation rather than having a separate configuration file.
 	conf, err := ParseFlags()
 	if err != nil {
 		exitWithMessage(1, fmt.Sprintf("failed reading flags or validating config: %s", err))
 	}
 
-	// create store
+	// Create raft store.
 	storeConfig := &store.Config{}
 	storeConfig.BindAddr = conf.RaftAddr
 	storeConfig.LocalID = raft.ServerID(conf.NodeID)
@@ -153,6 +155,7 @@ func main() {
 	}
 
 	if conf.JoinAddr != "" {
+		// Create request body.
 		jsonmap := make(map[string]interface{})
 		jsonmap["id"] = conf.NodeID
 		jsonmap["addr"] = conf.RaftAddr
@@ -162,6 +165,7 @@ func main() {
 			exitWithMessage(1, "cannot marshal request body into json")
 		}
 
+		// Send join request to the leader such that the
 		req, err := http.NewRequest("POST", conf.JoinAddr+"/join", bytes.NewBuffer(b))
 		if err != nil {
 			exitWithMessage(1, "cannot create HTTP post request.")
@@ -175,6 +179,9 @@ func main() {
 		}
 
 		defer resp.Body.Close()
+
+		// If joining failed end the program since the functionality will differ from
+		// what is expected.
 		if resp.StatusCode != http.StatusOK {
 			exitWithMessage(1, fmt.Sprintf(
 				"failed sending join request, got code: %d", req.Response.StatusCode))
@@ -182,10 +189,29 @@ func main() {
 	}
 
 	srv := httpd.New(conf.HTTPURL(), st)
+
+	// Enable authentication if conf.AuthFile field has been set. If the file is
+	// invalid we should inform the user since that leads to unwanted consequences
+	// if the files are wrong.
+	if conf.AuthFile != "" {
+		if err := srv.EnableAuth(conf.AuthFile); err != nil {
+			exitWithMessage(1, fmt.Sprintf("failed reading auth file: %s", err))
+		}
+	}
+
+	// ignore the error, because this function only populates the key/cert paths
+	// in the service struct. it also checks that if the files exist, but that isn't
+	// that necessary now. When we start the service, having invalid files will bring
+	// up the error.
+	srv.EnableHTTPS(conf.X509Cert, conf.X509CACert, conf.X509Key)
+
+	// Start the HTTP service.
 	if err := srv.Start(); err != nil {
 		log.Fatal("error starting server")
 	}
 
+	// Create a syscall listener for qutting the server. Since the service runs in a goroutine. Without this
+	// the service would close.
 	quitCh := make(chan os.Signal, 1)
 	signal.Notify(quitCh, os.Interrupt, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	<-quitCh

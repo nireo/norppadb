@@ -306,7 +306,6 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-
 	s.lgr.Printf("received request from node with ID %s, at %s, to join this node", id, addr)
 
 	if err := s.store.Join(id.(string), addr.(string)); err != nil {

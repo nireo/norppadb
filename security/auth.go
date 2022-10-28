@@ -8,6 +8,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// AllUser represents the permissions any user has in the auth store.
 const AllUser = "*"
 
 // Creds is used to parse credential entries from JSON.
@@ -62,6 +63,9 @@ func (as *AuthStore) Initialize(r io.Reader) error {
 	return nil
 }
 
+// SetForAllUser sets given permissions for every user in the credential store.
+// This is done by using a identifier for all users, to make code faster and
+// simpler.
 func (as *AuthStore) SetForAllUser(perms ...string) {
 	as.passwords[AllUser] = nil
 	for _, perm := range perms {
