@@ -50,27 +50,27 @@ func newStore(t *testing.T, port, id int, bootstrap bool) (*store.Store, error) 
 	return store.New(datadir, config, false)
 }
 
-func waitForLeaderID(s *store.Store, timeout time.Duration) (string, error) {
-	tck := time.NewTicker(100 * time.Millisecond)
-	defer tck.Stop()
-	tmr := time.NewTimer(timeout)
-	defer tmr.Stop()
+// func waitForLeaderID(s *store.Store, timeout time.Duration) (string, error) {
+// 	tck := time.NewTicker(100 * time.Millisecond)
+// 	defer tck.Stop()
+// 	tmr := time.NewTimer(timeout)
+// 	defer tmr.Stop()
 
-	for {
-		select {
-		case <-tck.C:
-			id, err := s.LeaderID()
-			if err != nil {
-				return "", err
-			}
-			if id != "" {
-				return id, nil
-			}
-		case <-tmr.C:
-			return "", fmt.Errorf("timeout expired")
-		}
-	}
-}
+// 	for {
+// 		select {
+// 		case <-tck.C:
+// 			id, err := s.LeaderID()
+// 			if err != nil {
+// 				return "", err
+// 			}
+// 			if id != "" {
+// 				return id, nil
+// 			}
+// 		case <-tmr.C:
+// 			return "", fmt.Errorf("timeout expired")
+// 		}
+// 	}
+// }
 
 func getNPorts(n int) []int {
 	ports := make([]int, n)

@@ -1,203 +1,188 @@
 package db
 
 import (
-	"errors"
 	"io"
-	"log"
-	"os"
-	"path/filepath"
-	"sync"
 	"time"
+
+	"github.com/dgraph-io/badger/v3"
+	"github.com/nireo/norppadb/messages"
 )
 
-const MaxKeySize int = 128             // 128 bytes
-const MaxValueSize int = (1 << 16) - 1 // 65kb
-const MaxFileSize int64 = 1 << 21      // 2mb
-
-type Database interface {
-	Put(key []byte, value []byte) error
-	Get(key []byte) ([]byte, error)
+// BadgerBackend also want to support in memory databases for quick access to improve
+// the store implementation's performance. Sometimes the raft store wants to
+// just spin up a fast instance and not having to parse/write to source files
+// improves performance.
+type BadgerBackend struct {
+	DB           *badger.DB
+	LastSnapshot time.Time
+	IsMem        bool
 }
 
-// DB contains the logic for handling the database
-type DB struct {
-	dir    string
-	active *File
-	dfiles map[int64]*File
-	idx    *kdir
-	mu     sync.RWMutex
-}
+// NewBadgerBackend creates/opens a badger database on disk. Slower than opening one
+// in memory, but the storage is persistant. The default option.
+func NewBadgerBackend(path string) (*BadgerBackend, error) {
+	opts := badger.DefaultOptions(path)
+	opts.Logger = nil
 
-func Open(dataDir string) (*DB, error) {
-	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(dataDir, os.ModePerm); err != nil {
-			return nil, err
-		}
-	}
-
-	activeFile, err := NewFile(dataDir, time.Now().Unix())
+	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, err
 	}
 
-	db := &DB{
-		active: activeFile,
-		dir:    dataDir,
-		dfiles: make(map[int64]*File),
-		idx:    newKdir(),
-	}
-
-	return db, nil
+	return &BadgerBackend{
+		DB:           db,
+		LastSnapshot: time.Now(),
+		IsMem:        false,
+	}, nil
 }
 
-// parsedir parses all of the datafiles in the directory.
-func (db *DB) parsedir() error {
-	datafiles, err := os.ReadDir(db.dir)
+// NewBadgerBackendMemory creates a badger database in memory. This is used when we
+// want to start-up a badger connection fast and write temporary values into it.
+// mostly used when recovering a Raft cluster.
+func NewBadgerBackendMemory() (*BadgerBackend, error) {
+	db, err := badger.Open(badger.DefaultOptions("").WithInMemory(true))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	var wg sync.WaitGroup
-	errChan := make(chan error)
-	for _, f := range datafiles {
-		var id int64
-		wg.Add(1)
-		go func(fname string, idd int64) {
-			// read a single datafile concurrently to speed up reading all of the files.
-			defer wg.Done()
-
-			id := ReadID(fname)
-			if id == 0 {
-				// failed reading entry.
-				log.Printf("failed reading filename: %s", fname)
-				return
-			}
-
-			var offset int64
-			df, err := NewReadOnly(filepath.Join(db.dir, fname))
-			if err != nil {
-				errChan <- err
-				return
-			}
-
-			// read entries.
-			for {
-				e, err := df.ReadHeader(offset)
-				if err != nil {
-					if err == io.EOF {
-						break
-					}
-					errChan <- err
-					return
-				}
-
-				ts := int64(e.Timestamp)
-				if meta, err := db.idx.Get(e.Key); err == nil {
-					if meta.timestamp < ts {
-						// update with the most recent entry. we need to check the
-						// timestamp since parsing is done concurrently, we cannot
-						// otherwise decide on the most recent entry otherwise.
-						db.idx.Set(e.Key, id, offset, ts)
-					}
-					// do nothing since the existing entry in the index is newer
-					// than the one of the entry
-				} else {
-					// key doesn't exist; set the key
-					db.idx.Set(e.Key, id, offset, ts)
-				}
-				offset += e.Size()
-			}
-
-			db.dfiles[id] = df
-		}(f.Name(), id)
-	}
-
-	close(errChan)
-	wg.Wait()
-	if len(errChan) != 0 {
-		return err
-	}
-
-	return nil
+	return &BadgerBackend{
+		DB:           db,
+		LastSnapshot: time.Now(),
+		IsMem:        true,
+	}, nil
 }
 
-func (db *DB) Put(key, value []byte) error {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-	// TODO: check size that we can change the active datafile
-	offset := db.active.offset
-	if offset > MaxFileSize {
-		// we can use the same pointer so that we don't need to open
-		// a new file pointer for no reason
-		db.dfiles[db.active.id] = db.active
+// Close closes the database connection.
+func (b *BadgerBackend) Close() error {
+	return b.DB.Close()
+}
 
-		var err error
-		db.active, err = NewFile(db.dir, time.Now().Unix())
+// Put writes a given key value pair into the database, prefer using the db.BatchWrite
+// when writing multiple keys, since this creates separate transactions for each write.
+func (b *BadgerBackend) Put(key, value []byte) error {
+	return b.DB.Update(func(txn *badger.Txn) error {
+		return txn.Set(key, value)
+	})
+}
+
+// Get gets a key from the collection. It is quite slow as it copies the bytes from
+// the database and creates a transaction but we don't really have a better choice.
+func (b *BadgerBackend) Get(key []byte) ([]byte, error) {
+	var val []byte
+	err := b.DB.View(func(txn *badger.Txn) error {
+		item, err := txn.Get(key)
 		if err != nil {
 			return err
 		}
-		// continue normal operations
-	}
-
-	if err := db.active.Write(&Entry{
-		Key:       key,
-		Value:     value,
-		KeySize:   uint8(len(key)),
-		ValueSize: uint16(len(value)),
-		Timestamp: uint32(time.Now().Unix()),
-	}); err != nil {
+		err = item.Value(func(valp []byte) error {
+			val = append([]byte{}, valp...)
+			return nil
+		})
 		return err
-	}
-	db.idx.Set(key, db.active.id, offset, time.Now().Unix())
-	return nil
+	})
+	return val, err
 }
 
-func (db *DB) Get(key []byte) ([]byte, error) {
-	db.mu.RLock()
-	defer db.mu.RUnlock()
+// Delete deletes a given key from the collection. Avoid using single operations, since
+// they create a separate transaction for each action. Meaning that they generate a
+// noticable amount of overhead.
+func (b *BadgerBackend) Delete(key []byte) error {
+	return b.DB.Update(func(txn *badger.Txn) error {
+		return txn.Delete(key)
+	})
+}
 
-	info, err := db.idx.Get(key)
+// Backup writes the database state into a given io.Writer. This is used to take Raft
+// snapshots. The db.Load() function loads the database that this function has written.
+func (b *BadgerBackend) Backup(w io.Writer) error {
+	_, err := b.DB.Backup(w, uint64(b.LastSnapshot.Unix()))
 	if err != nil {
-		return nil, err
-	}
-	if info.fileid == db.active.id {
-		return db.active.Read(info.offset)
-	}
-	return db.dfiles[info.fileid].Read(info.offset)
-}
-
-func (db *DB) Close() error {
-	db.active.Close()
-
-	for _, f := range db.dfiles {
-		f.Close()
-	}
-	return nil
-}
-
-func (db *DB) Sync() error {
-	if err := db.active.fp.Sync(); err != nil {
 		return err
 	}
+	b.LastSnapshot = time.Now()
+	return err
+}
 
-	var wg sync.WaitGroup
-	errChan := make(chan error)
-	for _, f := range db.dfiles {
-		wg.Add(1)
-		go func(df *File) {
-			defer wg.Done()
+// Load loads a snapshot of the database from a given reader. This is used when loading
+// a database's state from a Raft snapshot. The data that Load reads is generated by the
+// db.Backup() function.
+func (b *BadgerBackend) Load(r io.Reader) error {
+	return b.DB.Load(r, 4)
+}
 
-			if err := df.fp.Sync(); err != nil {
-				errChan <- err
-				return
+// BatchWrite writes a list of pairs into the collection. It is faster to write many
+// entries using this since this doesn't create a separate write transaction for each
+// pair.
+func (b *BadgerBackend) BatchWrite(pairs []*messages.KVPair) error {
+	batch := b.DB.NewWriteBatch()
+	defer batch.Cancel()
+
+	for i := range pairs {
+		entry := badger.NewEntry(pairs[i].Key, pairs[i].Value)
+		if err := batch.SetEntry(entry); err != nil {
+			return err
+		}
+	}
+
+	return batch.Flush()
+}
+
+// BatchGet tries to find all of the keys listed in the keys parameter. If a key is not
+// found, it will be ignored and the function will continue on to the next one.
+func (b *BadgerBackend) BatchGet(keys [][]byte) ([]*messages.KVPair, error) {
+	// cannot really preallocate these since we wont know how many of them will
+	// exist
+	res := make([]*messages.KVPair, 0)
+
+	for i := range keys {
+		val, err := b.Get(keys[i])
+		if err != nil || val == nil {
+			continue
+		}
+
+		res = append(res, &messages.KVPair{
+			Key:   keys[i],
+			Value: val,
+		})
+	}
+	return res, nil
+}
+
+// PrefixScan finds all the keys in the database that starts with the given
+// prefix.
+func (b *BadgerBackend) PrefixScan(prefix []byte) ([]*messages.KVPair, error) {
+	res := make([]*messages.KVPair, 0)
+
+	err := b.DB.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+
+			v, err := item.ValueCopy(nil)
+			if err != nil {
+				return err
 			}
-		}(f)
-	}
-	wg.Wait()
-	close(errChan)
 
-	if len(errChan) != 0 {
-		return errors.New("errors while syncing datafiles")
+			res = append(res, &messages.KVPair{
+				Key:   item.KeyCopy(nil),
+				Value: v,
+			})
+		}
+		return nil
+	})
+
+	return res, err
+}
+
+// GarbageCollector runs the Badger garbage collector every five minutes.
+func (b *BadgerBackend) GarbageCollector() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+	again:
+		if err := b.DB.RunValueLogGC(0.7); err == nil {
+			goto again
+		}
 	}
-	return nil
 }

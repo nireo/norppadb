@@ -28,8 +28,8 @@ type AuthStore struct {
 }
 
 // NewAuthStore returns an AuthStore pointer with the maps initialized.
-func NewAuthStore() *AuthStore {
-	return &AuthStore{
+func NewAuthStore() AuthStore {
+	return AuthStore{
 		passwords:   make(map[string][]byte),
 		permissions: make(map[string]map[string]struct{}),
 	}

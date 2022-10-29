@@ -20,7 +20,7 @@ import (
 
 type serverAuth struct {
 	enabled bool
-	store   *security.AuthStore
+	store   security.AuthStore
 }
 
 type Server struct {
@@ -29,7 +29,7 @@ type Server struct {
 	addr      string
 	closeChan chan struct{}
 	lgr       *log.Logger
-	auth      *serverAuth
+	auth      serverAuth
 	debug     bool // whether to enable debugging routes such as '/debug/pprof'
 
 	// these are public so we can easily configure them without having more
@@ -46,7 +46,7 @@ func New(addr string, store store.RaftStore) *Server {
 		addr:      addr,
 		closeChan: make(chan struct{}),
 		lgr:       log.New(os.Stderr, "[http]", log.LstdFlags),
-		auth: &serverAuth{
+		auth: serverAuth{
 			enabled: false,
 			store:   security.NewAuthStore(),
 		},
