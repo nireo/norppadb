@@ -531,6 +531,7 @@ func (s *Store) Delete(key []byte) error {
 	if err != nil {
 		return err
 	}
+
 	r := res.(*applyRes)
 	return r.err
 }

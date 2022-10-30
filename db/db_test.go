@@ -25,28 +25,7 @@ func createTestBadgerDB(t *testing.T) (*db.BadgerBackend, string) {
 	return db, file
 }
 
-type testpair struct {
-	key   []byte
-	value []byte
-}
-
-func genRandomPairs(amount, stringSize int) []testpair {
-	alphabet := []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-	alen := len(alphabet)
-	pairs := make([]testpair, amount)
-	for i := 0; i < amount; i++ {
-		b := make([]byte, stringSize)
-		for j := 0; j < stringSize; j++ {
-			b[j] = alphabet[rand.Intn(alen)]
-		}
-
-		pairs[i].key = b
-		pairs[i].value = b
-	}
-	return pairs
-}
-
-func genRandomPairs2(amount, stringSize int) []*messages.KVPair {
+func genRandomPairs(amount, stringSize int) []*messages.KVPair {
 	alphabet := []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 	alen := len(alphabet)
 	pairs := make([]*messages.KVPair, 0)
@@ -68,7 +47,7 @@ func genRandomPairs2(amount, stringSize int) []*messages.KVPair {
 }
 
 func TestBasicOperations(t *testing.T) {
-	pairs := genRandomPairs2(32, 10)
+	pairs := genRandomPairs(32, 10)
 	db, _ := createTestBadgerDB(t)
 
 	for _, pr := range pairs {
@@ -85,7 +64,7 @@ func TestBasicOperations(t *testing.T) {
 }
 
 func TestBatchWrite(t *testing.T) {
-	pairs := genRandomPairs2(16, 10)
+	pairs := genRandomPairs(16, 10)
 
 	// write pairs in patch
 	db, _ := createTestBadgerDB(t)

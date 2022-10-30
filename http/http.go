@@ -13,7 +13,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/nireo/norppadb/db"
 	"github.com/nireo/norppadb/security"
 	"github.com/nireo/norppadb/store"
 )
@@ -192,11 +191,6 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	key := []byte(r.URL.Path)
-	if len(key) > db.MaxKeySize {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
 	val, err := s.store.Get(key)
 	if err != nil {
 		leaderAddr := s.store.LeaderAddr()
@@ -235,13 +229,7 @@ func (s *Server) put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(key) > db.MaxKeySize || len(val) > db.MaxValueSize {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	err = s.store.Put(key, val)
-	if err != nil {
+	if err = s.store.Put(key, val); err != nil {
 		if err == store.ErrNotLeader {
 			leaderAddr := s.store.LeaderAddr()
 			if leaderAddr == "" {
@@ -366,6 +354,7 @@ func (s *Server) leave(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Addr returns the address struct from the internal listener
 func (s *Server) Addr() net.Addr {
 	return s.ln.Addr()
 }
