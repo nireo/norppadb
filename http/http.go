@@ -15,6 +15,7 @@ import (
 
 	"github.com/nireo/norppadb/security"
 	"github.com/nireo/norppadb/store"
+	"github.com/nireo/norppadb/worker"
 )
 
 type serverAuth struct {
@@ -23,13 +24,14 @@ type serverAuth struct {
 }
 
 type Server struct {
-	store     store.RaftStore
-	ln        net.Listener
-	addr      string
-	closeChan chan struct{}
-	lgr       *log.Logger
-	auth      serverAuth
-	debug     bool // whether to enable debugging routes such as '/debug/pprof'
+	store      store.RaftStore
+	ln         net.Listener
+	addr       string
+	closeChan  chan struct{}
+	lgr        *log.Logger
+	auth       serverAuth
+	debug      bool // whether to enable debugging routes such as '/debug/pprof'
+	writeQueue worker.Queue
 
 	// these are public so we can easily configure them without having more
 	// function params
@@ -41,10 +43,11 @@ type Server struct {
 // New creates the Server struct and helps to fill out some of the struct members.
 func New(addr string, store store.RaftStore) *Server {
 	return &Server{
-		store:     store,
-		addr:      addr,
-		closeChan: make(chan struct{}),
-		lgr:       log.New(os.Stderr, "[http]", log.LstdFlags),
+		store:      store,
+		addr:       addr,
+		closeChan:  make(chan struct{}),
+		lgr:        log.New(os.Stderr, "[http]", log.LstdFlags),
+		writeQueue: worker.NewQueue(128),
 		auth: serverAuth{
 			enabled: false,
 			store:   security.NewAuthStore(),

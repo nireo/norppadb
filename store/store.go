@@ -501,7 +501,7 @@ func (s *Store) Join(id, addr string) error {
 // Get finds a given key from the raft cluster. If StrongConsistency is enabled,
 // the get request will be redirected to the leader node. Otherwise the value is
 // read from the given node. Getting from a non-leader node means that the value
-// might be old.
+// might be old or non-existant.
 func (s *Store) Get(key []byte) ([]byte, error) {
 	// query from the leader
 	if s.conf.StrongConsistency {
