@@ -206,6 +206,7 @@ func (s *Store) setupdb(dir string) error {
 	return nil
 }
 
+// Apply a given raft command. All of the work is done by the applyHelper.
 func (s *Store) Apply(l *raft.Log) interface{} {
 	return applyHelper(l.Data, &s.db)
 }
@@ -336,7 +337,6 @@ func (f *snapshot) Persist(sink raft.SnapshotSink) error {
 
 		return sink.Close()
 	}()
-
 	if err != nil {
 		sink.Cancel()
 		return err
@@ -630,7 +630,8 @@ func fileExists(path string) bool {
 // RecoverNode tries to recover a Raft cluster from a given recovery configuration
 // file.
 func RecoverNode(dir string, logs raft.LogStore, stable raft.StableStore,
-	snaps raft.SnapshotStore, tn raft.Transport, conf raft.Configuration) error {
+	snaps raft.SnapshotStore, tn raft.Transport, conf raft.Configuration,
+) error {
 	// ensure that the configuration makes sense
 	if err := CheckRaftConfig(conf); err != nil {
 		return err
