@@ -21,6 +21,7 @@ require (
 	github.com/sean-/seed v0.0.0-20170313163322-e2103e2c3529 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
+	golang.org/x/text v0.3.6 // indirect
 )
 
 require (
@@ -45,6 +46,7 @@ require (
 	github.com/klauspost/compress v1.12.3 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/soheilhy/cmux v0.1.5
 	go.opencensus.io v0.22.5 // indirect
 	go.uber.org/zap v1.23.0
 	golang.org/x/net v0.0.0-20211112202133-69e39bad7dc2 // indirect
