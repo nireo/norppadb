@@ -54,7 +54,7 @@ func (r *Registry) setupSerf() error {
 	r.events = make(chan serf.Event)
 	config.EventCh = r.events
 	config.Tags = r.Tags
-	config.NodeName = r.Config.NodeName
+	config.NodeName = r.NodeName
 
 	r.serf, err = serf.Create(config)
 	if err != nil {
@@ -71,6 +71,7 @@ func (r *Registry) setupSerf() error {
 	return nil
 }
 
+// eventHandler handles all of the important serf events.
 func (r *Registry) eventHandler() {
 	for e := range r.events {
 		switch e.EventType() {
@@ -93,7 +94,7 @@ func (r *Registry) eventHandler() {
 }
 
 func (r *Registry) handleJoin(member serf.Member) {
-	if err := r.handler.Join(member.Name, member.Tags["rpc_addr"]); err != nil {
+	if err := r.handler.Join(member.Name, member.Tags["addr"]); err != nil {
 		r.logError(err, "failed to join", member)
 	}
 }
@@ -125,6 +126,6 @@ func (r *Registry) logError(err error, msg string, member serf.Member) {
 		msg,
 		zap.Error(err),
 		zap.String("name", member.Name),
-		zap.String("rcp_addr", member.Tags["rcp_addr"]),
+		zap.String("addr", member.Tags["addr"]),
 	)
 }

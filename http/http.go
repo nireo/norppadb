@@ -141,6 +141,23 @@ func (s *Server) Start() error {
 	return nil
 }
 
+func (s *Server) StartWithListener(ln net.Listener) error {
+	server := http.Server{
+		Handler: s,
+	}
+
+	s.ln = ln
+	s.closeChan = make(chan struct{})
+
+	go func() {
+		if err := server.Serve(ln); err != nil {
+			s.lgr.Printf("failed to start listening: %s", err)
+		}
+	}()
+
+	return nil
+}
+
 // redirectUrl creates a given url to redirect to. It checks the scheme and the
 // request url. This function is used to redirect a given HTTP request to the
 // leader.
@@ -187,7 +204,8 @@ func makeconf(cert, key, cacert string) (*tls.Config, error) {
 
 func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 	if s.auth.enabled {
-		if !s.auth.store.HasPermissionReq(r, "get") && !s.auth.store.HasPermisson(security.AllUser, "get") {
+		if !s.auth.store.HasPermissionReq(r, "get") &&
+			!s.auth.store.HasPermisson(security.AllUser, "get") {
 			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 			return
 		}
@@ -216,7 +234,8 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) put(w http.ResponseWriter, r *http.Request) {
 	if s.auth.enabled {
-		if !s.auth.store.HasPermissionReq(r, "get") && !s.auth.store.HasPermisson(security.AllUser, "put") {
+		if !s.auth.store.HasPermissionReq(r, "get") &&
+			!s.auth.store.HasPermisson(security.AllUser, "put") {
 			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 			return
 		}
