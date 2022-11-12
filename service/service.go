@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -50,7 +51,8 @@ type Service struct {
 // get the service running.
 func New(conf Config) (*Service, error) {
 	s := &Service{
-		Config: conf,
+		Config:    conf,
+		shutdowns: make(chan struct{}),
 	}
 
 	setups := []func() error{
@@ -84,9 +86,18 @@ func (s *Service) setupMux() error {
 
 // setupStore sets up the raft store.
 func (s *Service) setupStore() error {
+	listener := s.mux.Match(func(reader io.Reader) bool {
+		b := make([]byte, 1)
+		if _, err := reader.Read(b); err != nil {
+			return false
+		}
+		return b[0] == 1
+	})
+
 	conf := &store.Config{}
 	conf.LocalID = raft.ServerID(s.Config.NodeName)
 	conf.Bootstrap = s.Config.Bootstrap
+	conf.Transport = store.NewTransport(listener)
 
 	var err error
 	s.store, err = store.New(s.Config.DataDir, conf, false)
