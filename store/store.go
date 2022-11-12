@@ -60,6 +60,8 @@ type Config struct {
 	HeartbeatTimeout   time.Duration
 	ElectionTimeout    time.Duration
 	LeaderLeaseTimeout time.Duration
+
+	Transport *Transport
 }
 
 // RaftStore shows what methods a given Raft cluster should implement.
@@ -113,11 +115,7 @@ func New(dir string, conf *Config, logging bool) (*Store, error) {
 	}
 	log.Printf("addr: %v", addr.String())
 
-	transport, err := raft.NewTCPTransport(conf.BindAddr, addr, maxPool, raftTimeout, os.Stderr)
-	if err != nil {
-		return nil, err
-	}
-
+	transport := raft.NewNetworkTransport(conf.Transport, maxPool, raftTimeout, os.Stderr)
 	stableStore, err := raftboltdb.NewBoltStore(filepath.Join(raftDir, "raft.db"))
 	if err != nil {
 		return nil, err
@@ -182,7 +180,7 @@ func New(dir string, conf *Config, logging bool) (*Store, error) {
 		conf := raft.Configuration{
 			Servers: []raft.Server{{
 				ID:      config.LocalID,
-				Address: raft.ServerAddress(conf.BindAddr),
+				Address: raft.ServerAddress(conf.Transport.Addr().String()),
 			}},
 		}
 		err = st.raft.BootstrapCluster(conf).Error()

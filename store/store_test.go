@@ -47,6 +47,14 @@ func newStore(t *testing.T, port, id int, bootstrap bool) (*store.Store, error) 
 	config.SnapshotThreshold = 10000
 	config.Bootstrap = bootstrap
 
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	require.NoError(t, err)
+	config.Transport = store.NewTransport(ln)
+
+	t.Cleanup(func() {
+		os.RemoveAll(datadir)
+	})
+
 	return store.New(datadir, config, false)
 }
 
